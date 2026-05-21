@@ -1,0 +1,233 @@
+"""
+Namespace Router — maps extracted modules to FastMCP sub-servers.
+
+Each source module gets its own FastMCP sub-server, mounted on the root
+server with a namespace derived from the module path. This gives clean,
+collision-free tool naming:
+
+    src/utils.py       → /mcp/utils       → FastMCP("utils")
+    src/db/client.py   → /mcp/db_client   → FastMCP("db_client")
+"""
+
+from __future__ import annotations
+
+import asyncio
+import inspect
+import logging
+from typing import Any, Callable
+
+from fastmcp import FastMCP
+
+from faster_mcp.config.manifest import ManifestConfig, RoutingConfig
+from faster_mcp._registry import ToolRegistry, RegisteredTool, RegisteredResource
+
+logger = logging.getLogger(__name__)
+
+
+def _module_to_namespace(module_name: str, overrides: dict[str, str]) -> str:
+    """Convert a dotted module name to a namespace string.
+
+    Args:
+        module_name: Dotted module name like 'mylib.db.client'.
+        overrides: Custom namespace mappings from manifest.
+
+    Returns:
+        Namespace string like 'db_client'.
+    """
+    # Check explicit overrides first
+    if module_name in overrides:
+        return overrides[module_name]
+
+    # Also check path-style override (db/client → db_client)
+    path_key = module_name.replace(".", "/")
+    if path_key in overrides:
+        return overrides[path_key]
+
+    # Auto-derive: strip the root package, join with underscore
+    parts = module_name.split(".")
+    # If it's a single-level module, use it directly
+    if len(parts) == 1:
+        return parts[0]
+
+    # Otherwise use underscore-joined path
+    return "_".join(parts)
+
+
+def _build_tool_name(
+    tool: RegisteredTool,
+    separator: str = "_",
+) -> str:
+    """Generate the MCP tool name for a callable.
+
+    Functions: use the function name directly.
+    Methods: ClassName{separator}method_name to avoid collisions.
+    """
+    if tool.class_name and not tool.name.startswith(tool.class_name):
+        return f"{tool.class_name}{separator}{tool.name}"
+    return tool.name
+
+
+def _build_tool_description(tool: RegisteredTool | RegisteredResource) -> str:
+    """Generate a description for the MCP tool or resource."""
+    if tool.description:
+        # Use first line of description/docstring
+        first_line = tool.description.strip().split("\n")[0].strip()
+        if first_line:
+            return first_line
+
+    # Auto-generate a basic description
+    if isinstance(tool, RegisteredTool):
+        if tool.class_name:
+            return f"{tool.class_name}.{tool.name}()"
+        return f"{tool.name}()"
+    elif isinstance(tool, RegisteredResource):
+        return f"Resource: {tool.uri}"
+    
+    return ""
+
+
+class NamespaceRouter:
+    """Routes extracted modules to FastMCP sub-servers.
+
+    Creates one FastMCP instance per source module, registers
+    extracted callables as tools, then mounts everything on a
+    root server.
+    """
+
+    def __init__(
+        self,
+        config: ManifestConfig,
+        instance_manager: "InstanceManager" | None = None,
+    ):
+        """
+        Args:
+            config: Manifest configuration.
+            instance_manager: Manager for resolving class instances.
+        """
+        self.config = config
+        self.routing = config.routing
+        self.instance_manager = instance_manager
+        self._root: FastMCP | None = None
+        self._namespaces: dict[str, FastMCP] = {}
+
+    def build_server(
+        self,
+        registry: ToolRegistry,
+    ) -> FastMCP:
+        """Build the complete FastMCP server from the registry.
+
+        Args:
+            registry: The central tool registry.
+
+        Returns:
+            Root FastMCP server with all namespaces mounted.
+        """
+        self._root = FastMCP(
+            name=self.config.name,
+            instructions=self.config.description or f"{self.config.name} MCP Server",
+        )
+
+        for ns_name in registry.get_all_namespaces():
+            sub_server = self._build_namespace_server(ns_name, registry)
+            if sub_server:
+                self._namespaces[ns_name] = sub_server
+                self._root.mount(sub_server, namespace=ns_name)
+
+        return self._root
+
+    def _build_namespace_server(
+        self,
+        namespace: str,
+        registry: ToolRegistry,
+    ) -> FastMCP | None:
+        """Build a FastMCP sub-server for a single namespace."""
+        sub = FastMCP(
+            name=namespace,
+            instructions=f"Tools from {namespace}",
+        )
+
+        tool_count = 0
+
+        # Register tools
+        for tool in registry.get_namespace_tools(namespace):
+            if self._register_tool(sub, tool, namespace):
+                tool_count += 1
+
+        # Register resources
+        for resource in registry.get_namespace_resources(namespace):
+            self._register_resource(sub, resource, namespace)
+
+        if tool_count == 0 and not registry.get_namespace_resources(namespace):
+            return None
+
+        logger.info("Namespace '%s': registered %d tools", namespace, tool_count)
+        return sub
+
+    def _register_tool(
+        self,
+        server: FastMCP,
+        tool: RegisteredTool,
+        namespace: str,
+    ) -> bool:
+        """Register a single tool on the server."""
+        tool_name = _build_tool_name(tool, self.routing.separator)
+        description = _build_tool_description(tool)
+
+        # Check for manifest tool overrides
+        for override in self.config.tools:
+            # We match by qualified name if extracted_obj is present, else by simple name
+            qual_name = tool.extracted_obj.qualified_name if tool.extracted_obj else tool.name
+            if override.function == qual_name or override.function == tool.name:
+                if not override.expose:
+                    return False
+                if override.name:
+                    tool_name = override.name
+                if override.description:
+                    description = override.description
+                break
+
+        impl = tool.fn
+        
+        from faster_mcp.runtime.tool_wrapper import build_tool_wrapper
+        impl = build_tool_wrapper(tool, impl, self.instance_manager)
+
+        # Register with FastMCP
+        try:
+            server.tool(
+                name=tool_name,
+                description=description,
+            )(impl)
+            logger.debug("Registered tool: %s/%s", namespace, tool_name)
+            return True
+        except Exception as e:
+            logger.warning("Failed to register tool %s: %s", tool_name, e)
+            return False
+
+    def _register_resource(
+        self,
+        server: FastMCP,
+        resource: RegisteredResource,
+        namespace: str,
+    ) -> None:
+        """Register a property as an MCP resource."""
+        description = _build_tool_description(resource)
+
+        impl = resource.fn
+
+        try:
+            server.resource(resource.uri, description=description)(impl)
+            logger.debug("Registered resource: %s", resource.uri)
+        except Exception as e:
+            logger.warning("Failed to register resource %s: %s", resource.uri, e)
+
+
+
+    @property
+    def namespaces(self) -> list[str]:
+        """List of registered namespace names."""
+        return list(self._namespaces.keys())
+
+    @property
+    def root_server(self) -> FastMCP | None:
+        """The root FastMCP server instance."""
+        return self._root

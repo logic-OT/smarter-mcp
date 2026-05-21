@@ -1,0 +1,1 @@
+"""LLM-assisted description generation."""

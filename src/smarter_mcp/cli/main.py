@@ -284,15 +284,22 @@ def init(path: str, output: str | None, force: bool):
       smarter-mcp init ./src/mylib                 # scan dir  → write ./smarter-mcp.yaml
       smarter-mcp init ./src -o ./config           # scan ./src → write ./config/smarter-mcp.yaml
     """
-    scan_path = Path(path).resolve()
+    given_path = Path(path).resolve()
+
+    # If the given path doesn't exist, treat it as the output directory (create
+    # it) and fall back to scanning the cwd. This preserves the original
+    # `smarter-mcp init ./new-project` workflow where the dir is scaffolded fresh.
+    if not given_path.exists():
+        output_dir = given_path
+        scan_path = Path(output).resolve() if output else Path.cwd()
+    else:
+        scan_path = given_path
+        output_dir = Path(output).resolve() if output else Path.cwd()
+
     if not scan_path.exists():
-        raise click.ClickException(f"Path does not exist: {scan_path}")
+        raise click.ClickException(f"Source path does not exist: {scan_path}")
 
-    # Output always goes to CWD unless --output overrides it
-    output_dir = Path(output).resolve() if output else Path.cwd()
-
-    # Server name derived from what we're scanning, not where we write
-    server_name = (scan_path.stem if scan_path.is_file() else scan_path.name) or "my-mcp-server"
+    server_name = output_dir.name or "my-mcp-server"
 
     output_file = output_dir / "smarter-mcp.yaml"
     if output_file.exists() and not force:

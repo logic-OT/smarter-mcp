@@ -296,9 +296,15 @@ class SmarterMCP:
         self._extraction: ExtractionResult | None = None
         self._server: FastMCP | None = None
         self._router: NamespaceRouter | None = None
-        
+
         self._registry = ToolRegistry()
         self._instance_manager = InstanceManager(self._config.instances)
+
+        # Track which decorator-registered objects this instance has already
+        # consumed, so repeated build() calls don't double-register and the
+        # global registry is never cleared (clearing it would break sibling
+        # SmarterMCP instances in the same process).
+        self._registered_decorator_ids: set[int] = set()
 
 
 
@@ -440,16 +446,22 @@ class SmarterMCP:
         Returns:
             The fully configured and constructed FastMCP server instance.
         """
-        # Step 0.5: Register global toolkits, tools, and resources from decorators
+        # Step 0.5: Register decorator-registered toolkits, tools, and resources.
+        # Read from the live global so tools decorated after __init__ are picked
+        # up. Use _registered_decorator_ids to skip anything already consumed on
+        # a prior build() call, and never clear the global (other SmarterMCP
+        # instances in the same process may still need it).
         from smarter_mcp._decorators import (
             get_global_tools,
             get_global_resources,
             get_global_toolkits,
-            clear_global_registry,
         )
 
         # 1. Register global toolkits
         for cls in get_global_toolkits():
+            if id(cls) in self._registered_decorator_ids:
+                continue
+            self._registered_decorator_ids.add(id(cls))
             lifecycle = getattr(cls, "_smarter_mcp_lifecycle", "session")
             namespace = getattr(cls, "_smarter_mcp_namespace", "default")
             constructor_args = getattr(cls, "_smarter_mcp_constructor_args", {})
@@ -461,7 +473,6 @@ class SmarterMCP:
                 lifecycle=lifecycle,
                 args=constructor_args
             )
-            # Find methods decorated with @tool in this class
             for name, fn in cls.__dict__.items():
                 if getattr(fn, "_smarter_mcp_tool", False):
                     self._registry.register_tool(
@@ -474,14 +485,17 @@ class SmarterMCP:
                         source="decorator"
                     )
 
-        # 2. Register global tools
+        # 2. Register global tools (skip toolkit methods already registered above)
         for fn in get_global_tools():
+            if id(fn) in self._registered_decorator_ids:
+                continue
             is_toolkit_method = False
             for tk in self._registry._toolkits.values():
                 if fn in tk.cls.__dict__.values():
                     is_toolkit_method = True
                     break
             if not is_toolkit_method:
+                self._registered_decorator_ids.add(id(fn))
                 self._registry.register_tool(
                     fn,
                     name=getattr(fn, "_smarter_mcp_name", None),
@@ -490,23 +504,23 @@ class SmarterMCP:
                     source="decorator"
                 )
 
-        # 3. Register global resources
+        # 3. Register global resources (skip toolkit methods already registered above)
         for fn in get_global_resources():
+            if id(fn) in self._registered_decorator_ids:
+                continue
             is_toolkit_method = False
             for tk in self._registry._toolkits.values():
                 if fn in tk.cls.__dict__.values():
                     is_toolkit_method = True
                     break
             if not is_toolkit_method:
+                self._registered_decorator_ids.add(id(fn))
                 self._registry.register_resource(
                     fn,
                     uri=getattr(fn, "_smarter_mcp_uri", None) or f"resource://default/{fn.__name__}",
                     description=getattr(fn, "_smarter_mcp_description", None),
                     source="decorator"
                 )
-
-        # Clear global registry to prevent leaks/pollution across multiple app builds or test runs
-        clear_global_registry()
 
         # Step 1: Process manifest sources if any
         for source in self._config.sources:

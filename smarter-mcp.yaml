@@ -1,0 +1,948 @@
+# Smarter-MCP Server Manifest Configuration
+# Feel free to edit this file to configure your server.
+
+name: "pymcp"
+version: "0.1.0"
+description: "MCP Server generated from pymcp"
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  transport: "sse" # Options: sse, streamable-http, stdio
+  log_level: "info"
+
+sources:
+  - path: "/private/var/folders/7b/cj72_d7j6fz976klb3g42_ph0000gn/T/pytest-of-aideveloperminohealth/pytest-49/test_init_scaffolding0/new_mcp"
+    exclude:
+      - "test_*"
+      - "*_test.py"
+      - "conftest.py"
+
+# routing:
+#   base_path: "/mcp"
+#   root_aggregate: true
+#   separator: "_"
+
+# expose:
+#   include_private: false
+#   include_dunder: false
+#   include_inherited: false
+#   include_properties: true
+#   variadic_policy: "warn"
+#   unannotated_policy: "expose"
+
+# instances:
+#   - class_name: "DatabaseClient"
+#     lifecycle: "session"
+#     constructor_args:
+#       connection_string: "${DB_URL:sqlite:///:memory:}"
+
+tools:
+  # Discovered tools ready for overrides/tests:
+  # - function: src.smarter_mcp._decorators.register_global_tool
+  #   name: register_global_tool
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         fn: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._decorators.register_global_resource
+  #   name: register_global_resource
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         fn: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._decorators.register_global_toolkit
+  #   name: register_global_toolkit
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         cls: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._decorators.get_global_tools
+  #   name: get_global_tools
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp._decorators.get_global_resources
+  #   name: get_global_resources
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp._decorators.get_global_toolkits
+  #   name: get_global_toolkits
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp._decorators.clear_global_registry
+  #   name: clear_global_registry
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp._decorators.tool
+  #   name: tool
+  #   description: "Mark a function or method as an MCP tool.  Can be used with "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         first_arg: null
+  #         name: null
+  #         description: null
+  #         tests: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._decorators.resource
+  #   name: resource
+  #   description: "Mark a function or method as an MCP resource.  Can be used w"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         first_arg: null
+  #         uri: null
+  #         description: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._decorators.toolkit
+  #   name: toolkit
+  #   description: "Mark a class as an MCP toolkit.  Can be used with or without"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         first_arg: null
+  #         lifecycle: null
+  #         namespace: null
+  #         constructor_args: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._registry.ToolRegistry.register_tool
+  #   name: ToolRegistry_register_tool
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         fn: null
+  #         name: null
+  #         description: null
+  #         namespace: null
+  #         class_name: null
+  #         tests: null
+  #         source: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._registry.ToolRegistry.register_resource
+  #   name: ToolRegistry_register_resource
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         fn: null
+  #         uri: null
+  #         description: null
+  #         namespace: null
+  #         source: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._registry.ToolRegistry.register_toolkit
+  #   name: ToolRegistry_register_toolkit
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         cls: null
+  #         lifecycle: null
+  #         namespace: null
+  #         constructor_args: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._registry.ToolRegistry.merge_extraction
+  #   name: ToolRegistry_merge_extraction
+  #   description: "Merge auto-discovered tools/resources into the registry."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         extraction: null
+  #         implementations: null
+  #         namespace_override: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._registry.ToolRegistry.merge_module
+  #   name: ToolRegistry_merge_module
+  #   description: "Merge an imported module directly into the registry."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         extraction: null
+  #         module: null
+  #         namespace_override: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._registry.ToolRegistry.get_namespace_tools
+  #   name: ToolRegistry_get_namespace_tools
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         namespace: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._registry.ToolRegistry.get_namespace_resources
+  #   name: ToolRegistry_get_namespace_resources
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         namespace: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._registry.ToolRegistry.get_all_namespaces
+  #   name: ToolRegistry_get_all_namespaces
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp._registry.ToolRegistry.get_all_tools
+  #   name: ToolRegistry_get_all_tools
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp._registry.ToolRegistry.index_by_name
+  #   name: ToolRegistry_index_by_name
+  #   description: "Build a lookup mapping tool names → tool for O(1) override m"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp._schema.build_json_schema
+  #   name: build_json_schema
+  #   description: "Build a JSON Schema for a tool's input parameters.  Uses the"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         tool: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._testing.TestCase.from_dict
+  #   name: TestCase_from_dict
+  #   description: "Create a TestCase from the dict format used in decorators an"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         data: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._testing.TestReport.summary
+  #   name: TestReport_summary
+  #   description: "Human-readable one-line summary."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp._testing.ToolTestRunner.run_all
+  #   name: ToolTestRunner_run_all
+  #   description: "Run all predefined test cases for all registered tools."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp._testing.ToolTestRunner.run_tool
+  #   name: ToolTestRunner_run_tool
+  #   description: "Run all predefined test cases for a specific tool.  Args:   "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         tool_name: null
+  #       expect: null
+
+  # - function: src.smarter_mcp._testing.ToolTestRunner.run_adhoc
+  #   name: ToolTestRunner_run_adhoc
+  #   description: "Run an ad-hoc test with custom params (no expected value).  "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         tool_name: null
+  #         params: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.cli._detect.detect_app
+  #   name: detect_app
+  #   description: "Import a Python file as a module and scan for a SmarterMCP i"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         filepath: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.cli._detect.resolve_target
+  #   name: resolve_target
+  #   description: "Unified target resolution logic.  Resolves: 1. Explicit mani"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         target: null
+  #         manifest: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.cli.main.print_banner
+  #   name: print_banner
+  #   description: "Print the Smarter-MCP ASCII art banner."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         err: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.cli.main.cli
+  #   name: cli
+  #   description: "Smarter-MCP CLI — serve, validate, test, scaffold, and expor"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         args: null
+  #         kwargs: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.cli.main.serve
+  #   name: serve
+  #   description: "Start the MCP server."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         args: null
+  #         kwargs: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.cli.main.validate
+  #   name: validate
+  #   description: "Dry-run validation of the MCP server."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         args: null
+  #         kwargs: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.cli.main.test
+  #   name: test
+  #   description: "Run predefined or ad-hoc tool tests."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         args: null
+  #         kwargs: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.cli.main.init
+  #   name: init
+  #   description: "Scaffold a smarter-mcp.yaml manifest in the current working "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         args: null
+  #         kwargs: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.cli.main.export
+  #   name: export
+  #   description: "Export the server as a standalone pip package (coming soon)."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         args: null
+  #         kwargs: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.cli.main.BannersGroup.format_help
+  #   name: BannersGroup_format_help
+  #   description: "Writes the help into the formatter if it exists.  This is a "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         ctx: null
+  #         formatter: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.config.manifest.load_manifest
+  #   name: load_manifest
+  #   description: "Load and validate a manifest from a YAML file.  Args:     pa"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         path: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.config.manifest.default_manifest
+  #   name: default_manifest
+  #   description: "Create a default manifest for a source directory.  Used when"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         source_path: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.config.manifest.find_manifest
+  #   name: find_manifest
+  #   description: "Search for a manifest file in the given directory and parent"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         search_dir: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.config.manifest.SourceConfig.check_path_or_module
+  #   name: SourceConfig_check_path_or_module
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp.config.manifest.ManifestConfig.substitute_env_vars
+  #   name: ManifestConfig_substitute_env_vars
+  #   description: "Substitute ${VAR} patterns in all string values."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         data: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.config.manifest.ManifestConfig.coerce_null_lists
+  #   name: ManifestConfig_coerce_null_lists
+  #   description: "Coerce None to [] for list fields.  YAML parses a bare key w"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         data: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.errors.format_error_response
+  #   name: format_error_response
+  #   description: "Serialise an exception into a JSON string suitable for retur"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         tool_name: null
+  #         error: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.extractor.cache.cache_enabled
+  #   name: cache_enabled
+  #   description: "Resolve whether caching is active.  On when explicitly reque"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         explicit: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.extractor.cache.ExtractionCache.get
+  #   name: ExtractionCache_get
+  #   description: "Return the cached module for this source, or None on miss."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         source: null
+  #         module_name: null
+  #         use_inspect: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.extractor.cache.ExtractionCache.put
+  #   name: ExtractionCache_put
+  #   description: "Store a module. Failures (unpicklable default, read-only FS)"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         source: null
+  #         module_name: null
+  #         use_inspect: null
+  #         module: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.extractor.docstrings.detect_format
+  #   name: detect_format
+  #   description: "Detect the docstring format from content patterns."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         docstring: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.extractor.docstrings.parse_docstring
+  #   name: parse_docstring
+  #   description: "Parse a docstring in any supported format.  Auto-detects the"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         docstring: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.extractor.filters.apply_filters
+  #   name: apply_filters
+  #   description: "Apply exposure rules to extraction results.  Args:     resul"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         result: null
+  #         rules: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.extractor.models.ExtractionResult.summary
+  #   name: ExtractionResult_summary
+  #   description: "Human-readable summary of extraction results."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp.extractor.surface.SurfaceExtractor.extract
+  #   name: SurfaceExtractor_extract
+  #   description: "Run extraction on all Python files under source_root."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp.extractor.surface.SurfaceExtractor.extract_file
+  #   name: SurfaceExtractor_extract_file
+  #   description: "Extract a single Python file."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         file_path: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.extractor.surface.SurfaceExtractor.extract_source
+  #   name: SurfaceExtractor_extract_source
+  #   description: "Extract from a source string directly (useful for testing)."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         source: null
+  #         module_path: null
+  #         module_name: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.extractor.type_inference.infer_param_type_from_default
+  #   name: infer_param_type_from_default
+  #   description: "Infer parameter type from its default value.  Args:     defa"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         default: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.extractor.type_inference.infer_return_type
+  #   name: infer_return_type
+  #   description: "Infer a function's return type from its return statements.  "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         tree: null
+  #         func_name: null
+  #         class_name: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.llm.client.build_llm_client
+  #   name: build_llm_client
+  #   description: "Construct an OpenAI SDK client for the given config."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         config: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.llm.client.LLMClient.generate
+  #   name: LLMClient_generate
+  #   description: "Return a single completion string for the given system/user "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         system: null
+  #         user: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.llm.client.OpenAIClient.generate
+  #   name: OpenAIClient_generate
+  #   description: "Return a single completion string for the given system/user "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         system: null
+  #         user: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.llm.generator.LLMGenerator.save_cache
+  #   name: LLMGenerator_save_cache
+  #   description: "Persist the description cache to disk (if it changed)."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp.llm.generator.LLMGenerator.generate_for_tool
+  #   name: LLMGenerator_generate_for_tool
+  #   description: "Generate (or fetch from cache) a description for a single to"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         tool: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.llm.generator.LLMGenerator.enrich_registry
+  #   name: LLMGenerator_enrich_registry
+  #   description: "Fill in descriptions for tools across the whole registry.  R"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         registry: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.multimodal.interceptor.is_pillow_available
+  #   name: is_pillow_available
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp.multimodal.interceptor.is_numpy_available
+  #   name: is_numpy_available
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp.multimodal.interceptor.resolve_image_input
+  #   name: resolve_image_input
+  #   description: "Resolves the input value (path, URL, base64 string, data URL"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         val: null
+  #         target_type: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.multimodal.interceptor.coerce_to_fastmcp_image
+  #   name: coerce_to_fastmcp_image
+  #   description: "Converts a PIL Image, NumPy array, bytes, or Path into a fas"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         val: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.runtime.coercion.coerce_arguments
+  #   name: coerce_arguments
+  #   description: "Coerce FastMCP kwargs into the types expected by the callabl"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         tool: null
+  #         kwargs: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.runtime.instances.InstanceManager.add_config
+  #   name: InstanceManager_add_config
+  #   description: "Programmatically add an instance configuration."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         class_name: null
+  #         lifecycle: null
+  #         args: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.runtime.instances.InstanceManager.get_instance
+  #   name: InstanceManager_get_instance
+  #   description: "Get or create an instance of the class.  Args:     class_nam"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         class_name: null
+  #         cls_obj: null
+  #         ctx: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.runtime.tool_wrapper.build_tool_wrapper
+  #   name: build_tool_wrapper
+  #   description: "Build a FastMCP-compatible wrapper for a callable.  Args:   "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         tool: null
+  #         impl: null
+  #         instance_manager: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.app.SmarterMCP.discover
+  #   name: SmarterMCP_discover
+  #   description: "Scan the filesystem within a source directory to discover an"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         source_root: null
+  #         exclude: null
+  #         use_cache: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.app.SmarterMCP.discover_module
+  #   name: SmarterMCP_discover_module
+  #   description: "Discover and register tools from an already-imported python "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         module: null
+  #         include: null
+  #         exclude: null
+  #         namespace: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.app.SmarterMCP.build
+  #   name: SmarterMCP_build
+  #   description: "Compile the configuration, extract tools/resources, and buil"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.app.SmarterMCP.test
+  #   name: SmarterMCP_test
+  #   description: "Run tool tests.  Three calling patterns:     app.test()     "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         tool_name: null
+  #         params: null
+  #         verbose: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.app.SmarterMCP.http_app
+  #   name: SmarterMCP_http_app
+  #   description: "Construct and return the Starlette ASGI application with con"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.app.SmarterMCP.run
+  #   name: SmarterMCP_run
+  #   description: "Compile, configure, and start the MCP server, blocking execu"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.health.HealthEndpoint.get_health
+  #   name: HealthEndpoint_get_health
+  #   description: "Generate health status report."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.router.NamespaceRouter.build_server
+  #   name: NamespaceRouter_build_server
+  #   description: "Build the complete FastMCP server from the registry.  Args: "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         registry: null
+  #         auth: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.schema_endpoint.SchemaEndpoint.get_namespace_schema
+  #   name: SchemaEndpoint_get_namespace_schema
+  #   description: "Generate schema for all tools in a namespace.  Args:     nam"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         namespace: null
+  #         compact: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.security.load_api_keys
+  #   name: load_api_keys
+  #   description: "Read comma-separated API keys from the named environment var"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         env_var: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.security.build_auth_provider
+  #   name: build_auth_provider
+  #   description: "Build a FastMCP Bearer token verifier from the configured AP"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         config: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.security.session_client_id
+  #   name: session_client_id
+  #   description: "Best-effort per-session identifier for rate limiting.  Falls"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         context: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.security.build_rate_limit_middleware
+  #   name: build_rate_limit_middleware
+  #   description: "Build per-session and global sliding-window rate-limit middl"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         config: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.security.APIKeyMiddleware.dispatch
+  #   name: APIKeyMiddleware_dispatch
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         request: null
+  #         call_next: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.security._SlidingWindow.is_allowed
+  #   name: _SlidingWindow_is_allowed
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         max_requests: null
+  #         window_seconds: null
+  #       expect: null
+
+  # - function: src.smarter_mcp.server.security.SlidingWindowMiddleware.on_request
+  #   name: SlidingWindowMiddleware_on_request
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         context: null
+  #         call_next: null
+  #       expect: null
+
+  # - function: tests.fixtures.class_methods.db_client.BaseClient.connect
+  #   name: BaseClient_connect
+  #   description: "Establish connection."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: tests.fixtures.class_methods.db_client.BaseClient.disconnect
+  #   name: BaseClient_disconnect
+  #   description: "Close connection."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         {}
+  #       expect: null
+
+  # - function: tests.fixtures.class_methods.db_client.DatabaseClient.query
+  #   name: DatabaseClient_query
+  #   description: "Execute a SQL query.  Args:     sql: The SQL query string.  "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         sql: null
+  #         params: null
+  #       expect: null
+
+  # - function: tests.fixtures.class_methods.db_client.DatabaseClient.query_async
+  #   name: DatabaseClient_query_async
+  #   description: "Execute a SQL query asynchronously.  Args:     sql: The SQL "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         sql: null
+  #       expect: null
+
+  # - function: tests.fixtures.class_methods.db_client.DatabaseClient.from_url
+  #   name: DatabaseClient_from_url
+  #   description: "Create a client from a connection URL.  Args:     url: Datab"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         url: null
+  #       expect: null
+
+  # - function: tests.fixtures.class_methods.db_client.DatabaseClient.parse_url
+  #   name: parse_url
+  #   description: "Parse a database URL into components.  Args:     url: The UR"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         url: null
+  #       expect: null
+
+  # - function: tests.fixtures.simple_functions.math_utils.add
+  #   name: add
+  #   description: "Add two numbers together.  Args:     a: The first number.   "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         a: null
+  #         b: null
+  #       expect: null
+
+  # - function: tests.fixtures.simple_functions.math_utils.multiply
+  #   name: multiply
+  #   description: "Multiply two numbers."
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         a: null
+  #         b: null
+  #       expect: null
+
+  # - function: tests.fixtures.simple_functions.math_utils.fetch_data
+  #   name: fetch_data
+  #   description: "Fetch data from a URL.  Args:     url: The URL to fetch from"
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         url: null
+  #         timeout: null
+  #       expect: null
+
+  # - function: tests.fixtures.simple_functions.math_utils.greet
+  #   name: greet
+  #   description: "Greet someone (no type annotations).  Parameters ---------- "
+  #   expose: true
+  #   tests:
+  #     - params:
+  #         name: null
+  #         greeting: null
+  #       expect: null
+

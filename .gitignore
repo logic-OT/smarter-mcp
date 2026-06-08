@@ -30,6 +30,6 @@ htmlcov/
 
 # Smarter-MCP runtime artifacts (extraction cache, LLM description cache)
 .smarter-mcp/
-tests/
+/tests
 /docs/superpowers
 pending.md

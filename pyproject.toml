@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    { name = "minoHealth" },
+    { name = "logic-OT" },
 ]
 keywords = ["mcp", "model-context-protocol", "ai", "agents", "fastmcp"]
 classifiers = [
@@ -48,8 +48,8 @@ all = ["smarter-mcp[multimodal,dev]"]
 smarter-mcp = "smarter_mcp.cli.main:cli"
 
 [project.urls]
-Homepage = "https://github.com/minoHealth/smarter-mcp"
-Repository = "https://github.com/minoHealth/smarter-mcp"
+Homepage = "https://github.com/logic-OT/smarter-mcp"
+Repository = "https://github.com/logic-OT/smarter-mcp"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/smarter_mcp"]

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "smarter-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "Turn any Python codebase into a production-grade MCP server with zero friction."
 readme = "README.md"
 license = "MIT"

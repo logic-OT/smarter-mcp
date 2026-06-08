@@ -229,7 +229,7 @@ from PIL import Image
 
 app = SmarterMCP("test-server")
 
-@tool(tests=[{"params": {"name": "Mino"}, "expect": "Hello, Mino!"}])
+@tool(tests=[{"params": {"name": "Bob"}, "expect": "Hello, Bob!"}])
 def greet(name: str) -> str:
     return f"Hello, {name}!"
 

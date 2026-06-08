@@ -1,3 +1,9 @@
+```
+┌─┐ ┌┬┐ ┌─┐ ┬─┐ ┌┬┐ ┌─┐ ┬─┐
+└─┐ │││ ├─┤ ├┬┘  │  ├┤  ├┬┘ - MCP
+└─┘ ┴ ┴ ┴ ┴ ┴└─  ┴  └─╸ ┴└─
+```
+
 # Smarter-MCP 🧠  🚀
 
 > **The highest-level Python framework for building, generating, and running MCP servers.**

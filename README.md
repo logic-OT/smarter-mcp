@@ -1,42 +1,45 @@
-# Smarter-MCP 🚀
+# Smarter-MCP 🧠  🚀
 
 > **The highest-level Python framework for building, generating, and running MCP servers.**
 
-Smarter-MCP sits on top of `FastMCP` and acts as the orchestration layer that handles everything a developer shouldn't have to think about: AST-based signature extraction, type coercion, class-instance lifecycle management, namespace routing, multimodal content interception, and structured error handling.
+*If Python can call it, Smarter-MCP can serve it.*
+
+```bash
+pip install smarter-mcp
+```
+
+---
+Smarter-MCP sits on top of FastMCP and acts as the orchestration layer that handles everything a developer shouldn't have to think about:
+
+## Three ways in, one runtime
+
+### 1. Existing code — zero rewrites
+
+Point at any module you already have (or anything on PyPI):
+
+```python
+import pandas as pd
+from smarter_mcp import SmarterMCP
+
+app = SmarterMCP("data-tools")
+app.discover_module(pd.DataFrame, include=["describe", "head", "tail"])
+app.run()
+```
+
+Or scan an entire local codebase from the CLI:
+
+```bash
+smarter-mcp serve ./src/mylib
+```
+
+The dual-pass engine (AST + inspect) reads your signatures, builds JSON schemas, and serves them. Nothing to rewrite.
 
 ---
 
-## 📖 Philosophy: Primitives vs. Abstractions
+### 2. Stateful class tools
 
-FastMCP gives you **primitives**. Smarter-MCP gives you **abstractions**.
+When your tools need shared state (a DB connection, an API client, an ML model loaded once), `@toolkit` manages it:
 
-1. **If you own the code**: Write clean, decorated Python. Smarter-MCP provides `@tool`, `@toolkit`, and `@resource` standalone decorators that plug into a powerful runtime featuring session-scoped instances, automatic type coercion, and multimodal support.
-2. **If you don't own the code**: Point Smarter-MCP at it. Pass an imported module object, a directory path, or a YAML manifest. The dual-pass extraction engine (AST + inspect) handles the rest—no source modifications required.
-
-Both paths converge into the same runtime engine. Every tool gets the same production-grade treatment regardless of how it was registered.
-
-### 1. Decorators (For Writing New Tools)
-
-Decorators provide a clean, native Python API for authoring MCP servers from scratch.
-
-* **Simple function tools & resources:**
-```python
-from smarter_mcp import SmarterMCP
-
-app = SmarterMCP("my-server")
-
-from smarter_mcp import tool, resource
-
-@tool("Greet a user by name")
-def greet(name: str) -> str:
-    return f"Hello, {name}!"
-
-@resource("config://settings")
-def get_settings() -> dict:
-    return {"debug": True, "version": "1.0"}
-```
-
-* **Class-based toolkits (For DB clients, stateful APIs, ML pipelines):**
 ```python
 from smarter_mcp import tool, toolkit
 
@@ -50,63 +53,78 @@ class DatabaseClient:
         """Execute a SQL query and return results."""
         return self.conn.execute(sql).fetchall()
 ```
-The `@toolkit()` decorator automatically manages session instantiations, `self` binding per session, constructor argument injections, and cleanup on session termination.
+
+One instance per session. Constructor args injected from config. Cleaned up on session end. You write the class, Smarter-MCP handles the plumbing.
 
 ---
 
-### 2. `discover_module()` (Expose Any Python Module)
-
-Import any standard library module, third-party pip package, or local file and hand it to Smarter-MCP. It automatically extracts methods, builds schemas, and serves them.
+### 3. ✍️ Fresh tools from scratch
 
 ```python
-import random
-import json
-from smarter_mcp import SmarterMCP
+from smarter_mcp import SmarterMCP, tool, resource
 
-app = SmarterMCP("multi-tools")
+app = SmarterMCP("my-server")
 
-# Instantly expose safe subsets of libraries
-app.discover_module(random, include=["choices", "randint", "sample"])
-app.discover_module(json, include=["dumps", "loads"])
-app.run()
-```
-**What this unlocks:** Any Python package ever published on PyPI can become an MCP server with a single line of code.
+@tool("Greet a user by name")
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
 
----
+@resource("config://settings")
+def get_settings() -> dict:
+    return {"debug": True, "version": "1.0"}
 
-### 3. `discover()` (Scan an Entire Source Directory)
-
-Scan local codebases with zero source modifications. It automatically detects and exposes:
-* Module-level functions, class methods, static methods, and instance methods.
-* `@property` descriptors—mapped to MCP *resources*, not tools (e.g., `resource://{module}/{Class}/{property}`).
-* Automated class instantiation using config-defined overrides, singleton factories (`get_<Class>()`), or default fallbacks.
-
-```python
-app = SmarterMCP("my-codebase-server")
-app.discover("./src/mylib", exclude=["test_*"])
 app.run()
 ```
 
 ---
 
-### 4. Zero-Code CLI & YAML-driven Manifests
+## ⚙️ What the runtime gives every tool
 
-Spin up, validate, and test servers directly from the command line without writing Python wrapper code:
+Regardless of how a tool was registered, every call goes through:
 
-```bash
-# Auto-discover a local directory
-smarter-mcp serve ./mylib
+- ✅ **Schema validation** — parameters validated before your function is called. Clean errors back to the agent, not raw tracebacks.
+ **Type coercion** — agents send `"42"` instead of `42` constantly. Handled silently.
+- ✅ **Schema validation** — parameters validated before your function is called. Clean errors back to the agent, not raw tracebacks.
+- ✅ **Schema validation** — parameters validated before your function is called. Clean errors back to the agent, not raw tracebacks.
+- ✅ **Multimodal** — `PIL.Image` and `np.ndarray` parameters decoded from `ImageContent` automatically. Return images and they're wrapped back up.
+- ✅ **Instance lifecycle** — `session`, `singleton`, or `per-call`. Resolved and bound per request.
+- ✅ **Namespace routing** — auto-derived from module paths. No silent name collisions.
+- ✅ **Auth + rate limiting** — API key middleware and sliding-window rate limits, config-driven.
 
-# Start a decorator-based server script
-smarter-mcp serve ./app.py
+---
 
-# Run with a manifest YAML config
-smarter-mcp serve --manifest smarter-mcp.yaml
-```
+## ✨ AI-generated tool descriptions
 
-Example `smarter-mcp.yaml` manifest:
+Most Python code in the wild has no docstrings. That's fine.
+
+Point Smarter-MCP at an undocumented library and it will write the tool descriptions for you using Claude, GPT, or any OpenAI-compatible model. Every tool your agent sees gets a clean, accurate description regardless of what the original code looked like.
+
 ```yaml
-name: chemistry-tools
+llm:
+  provider: anthropic        # or openai, openrouter
+  model: claude-3-5-haiku
+  cache: true
+```
+or in code:
+
+```python
+server = SmarterMCP(
+    "my-server",
+    llm_enabled=True,
+    llm_provider="anthropic",
+    llm_model="claude-3-5-haiku",
+)
+server.run()
+```
+
+**Undocumented code stops being a blocker.**
+
+---
+
+## 📋 YAML manifest — no Python required
+
+```yaml
+name: my-server
 version: 0.1.0
 
 server:
@@ -122,132 +140,35 @@ sources:
 
 expose:
   private: false
-  inherited: false
   unannotated: warn
-  variadic: skip
+```
+
+```bash
+smarter-mcp serve --manifest smarter-mcp.yaml
 ```
 
 ---
 
-## 🛠️ The Production-Grade Runtime Pipeline
+## 🚀 Getting started
 
-Every tool call passes through a rigorous runtime pipeline before executing:
+```bash
+pip install smarter-mcp
+```
 
-1. **Schema Validation**: Parameters are validated against the JSON schema before functions are called. Clear validation errors are returned to the agent, not raw Python tracebacks.
-2. **Type Coercion**: Common agent formatting errors (e.g., sending `"42"` instead of `42`, or a stringified JSON instead of a `dict`) are resolved automatically.
-3. **Instance Resolution**: Resolves and binds classes depending on `session`, `singleton`, or `per-call` configurations.
-4. **Context Injection**: Automatically injects a FastMCP `Context` parameter if the function accepts it.
-5. **Multimodal Interception**: Automatically decodes incoming `ImageContent` parameters into Pillow `PIL.Image.Image` or NumPy `np.ndarray` structures (handling base64 data, URLs, or local files). Returns images back to the agent as wrapped `ImageContent`.
-6. **Structured Error Handling**: Catches exceptions and returns them as structured MCP error objects to prevent agent confusion.
+For multimodal support (PIL / numpy):
+
+```bash
+pip install "smarter-mcp[multimodal]"
+```
+
+Then point it at your code:
+
+```bash
+smarter-mcp serve ./src/mylib --port 8000
+smarter-mcp validate ./my_tools.py
+smarter-mcp test ./my_tools.py
+```
 
 ---
 
-## 🔄 Gap Comparison: FastMCP vs. Smarter-MCP
-
-| Capability | FastMCP | Smarter-MCP |
-| :--- | :--- | :--- |
-| **Decorator API** | `@mcp.tool()` (manual wiring) | `@tool` with auto coercion, schema, multimodal |
-| **Class Toolkits** | Manual `add_tool()` per method | `@toolkit` with session-scoped instances |
-| **Expose Existing Modules** | Not supported | `app.discover_module(random)` |
-| **Auto-Discover Codebase** | Not supported | `app.discover("./mylib")` |
-| **CLI / YAML config** | Not supported | `smarter-mcp serve`, full manifest |
-| **Instance Lifecycle** | Manual | session / singleton / per-call, auto-managed |
-| **Type Coercion** | None | `"42"` → `42` automatically |
-| **Namespace Routing** | Manual `mount()` | Auto-derived from module paths |
-| **Multimodal** | Manual encoding | `PIL.Image`, `ndarray`, `bytes` auto-detected |
-| **Tool Name Collisions** | Silent overwrite | Auto-namespaced (`ClassName_method`) |
-| **Property → Resource** | Not supported | Automatic mapping |
-| **Docstring Parsing** | Raw docstring only | Google/NumPy/Sphinx parsed per-parameter |
-| **Type Inference** | None | AST-based inference from defaults + returns |
-| **Error Handling** | Raw Python tracebacks | Structured MCP error objects (coercion vs. execution) |
-| **HTTP Introspection** | Not supported | `GET /health` + `GET /mcp/{ns}/schema` (with `?compact=true`) |
-| **Authentication** | Manual | `X-API-Key` middleware + FastMCP Bearer, config-driven |
-| **Rate Limiting** | Manual | Sliding window, per-session + global |
-| **LLM Descriptions** | Not supported | Auto-generate missing docs via OpenAI SDK (OpenAI/OpenRouter/Anthropic), cached |
-| **Package Export** | Not supported | `smarter-mcp export` → standalone package |
-| **`*args/**kwargs`** | Silent runtime failure | Detected, skipped with warning |
-| **Schema Validation** | None | Every call validated against JSON schema |
-
----
-
-## 🧪 How to Setup and Test the Codebase Locally
-
-Follow these steps to run, verify, and test Smarter-MCP locally in a clean Python virtual environment.
-
-### 1. Initialize the Virtual Environment
-
-Run these commands in the project root:
-```bash
-# Create a virtual environment
-python3 -m venv .venv
-
-# Activate the virtual environment
-source .venv/bin/activate
-
-# Ensure pip is up to date
-pip install --upgrade pip
-```
-
-### 2. Install Smarter-MCP with All Dependencies
-
-Install Smarter-MCP in **editable mode** with development and multimodal extras:
-```bash
-pip install -e ".[all]"
-```
-
-### 3. Run the Test Suite
-
-We use `pytest` for unit testing. Execute all tests (CLI command runner, multimodal parser, AST extraction, and testing framework):
-```bash
-pytest
-```
-
-To run individual test files:
-```bash
-# Verify CLI command configurations
-pytest tests/test_cli.py
-
-# Verify multimodal image/blob interception
-pytest tests/test_multimodal.py
-
-# Verify tool validation & testing runner
-pytest tests/test_testing_framework.py
-```
-
-### 4. Verify the CLI Manually
-
-You can test the command line options inside your activated virtual environment:
-
-```bash
-# Check CLI help outputs
-smarter-mcp --help
-
-# Create a sample python file with tools
-cat << 'EOF' > test_server.py
-from smarter_mcp import SmarterMCP, tool
-from PIL import Image
-
-app = SmarterMCP("test-server")
-
-@tool(tests=[{"params": {"name": "Bob"}, "expect": "Hello, Bob!"}])
-def greet(name: str) -> str:
-    return f"Hello, {name}!"
-
-@tool()
-def process_img(img: Image.Image) -> Image.Image:
-    return img.rotate(90)
-EOF
-
-# Dry-run validation of the server
-smarter-mcp validate test_server.py
-
-# Run the predefined tests inside the file
-smarter-mcp test test_server.py
-
-# Serve the server locally (press Ctrl+C to stop)
-smarter-mcp serve test_server.py --port 8000
-```
-Clean up the test server script when done:
-```bash
-rm test_server.py
-```
+*Built on [FastMCP](https://github.com/jlowin/fastmcp).*

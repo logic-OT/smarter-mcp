@@ -32,3 +32,4 @@ htmlcov/
 .smarter-mcp/
 /tests
 /docs/superpowers
+/dist

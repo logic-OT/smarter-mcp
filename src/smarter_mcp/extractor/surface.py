@@ -20,11 +20,15 @@ import importlib
 import importlib.util
 import inspect
 import logging
+import os
 import sys
 import textwrap
+import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from .cache import ExtractionCache, cache_enabled
 from .docstrings import parse_docstring
 from .models import (
     MISSING,
@@ -39,6 +43,48 @@ from .models import (
 from .type_inference import infer_param_type_from_default, infer_return_type
 
 logger = logging.getLogger(__name__)
+
+# Guards mutation of the global ``sys.path`` during runtime imports. ``sys.path``
+# is process-global, so any code that temporarily prepends to it (the inspect
+# pass, implementation resolution) must serialize to stay correct if extraction
+# is ever parallelized (e.g. a ThreadPoolExecutor across files).
+_SYS_PATH_LOCK = threading.Lock()
+
+
+# Directory names that must never be scanned — virtual environments,
+# installed dependencies, VCS metadata, caches, and build artifacts.
+# Any dependency/env folder named like one of these is pruned outright.
+_EXCLUDED_DIR_NAMES = frozenset({
+    "__pycache__",
+    "site-packages",
+    "dist-packages",
+    "node_modules",
+    ".git", ".hg", ".svn",
+    ".tox", ".nox",
+    ".venv", "venv", "env", ".env", "virtualenv",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache", ".cache",
+    "build", "dist", ".eggs",
+})
+
+# If a single scan would cover more than this many files, emit a loud
+# warning — it almost always means source_root was not scoped and the
+# whole tree (often a checkout root) is being walked.
+_SCAN_FILE_WARN_THRESHOLD = 500
+
+
+def _is_pruned_dir(name: str) -> bool:
+    """Whether a directory should be skipped during discovery.
+
+    Catches known env/cache/build folders, any hidden (dot) directory, and
+    Python package metadata folders (``*.egg-info`` / ``*.dist-info``).
+    """
+    if name in _EXCLUDED_DIR_NAMES:
+        return True
+    if name.startswith("."):
+        return True
+    if name.endswith(".egg-info") or name.endswith(".dist-info"):
+        return True
+    return False
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -273,12 +319,11 @@ def _extract_class_ast(
 
 
 def _extract_module_ast(
-    source: str,
+    tree: ast.Module,
     module_path: str,
     module_name: str,
 ) -> ExtractedModule:
-    """Extract all callables from a module source string via AST."""
-    tree = ast.parse(source, filename=module_path)
+    """Extract all callables from a pre-parsed module AST."""
     functions: list[ExtractedCallable] = []
     classes: list[ExtractedClass] = []
 
@@ -325,18 +370,20 @@ _INSPECT_PARAM_KIND_MAP = {
 def _import_module_safe(module_name: str, source_root: str) -> Any | None:
     """Import a module by name, returning None if import fails.
 
-    Temporarily adds source_root to sys.path so local modules resolve.
+    Temporarily adds source_root to sys.path so local modules resolve. The
+    mutation is serialized via ``_SYS_PATH_LOCK`` since ``sys.path`` is global.
     """
-    original_path = sys.path.copy()
-    try:
-        if source_root not in sys.path:
-            sys.path.insert(0, source_root)
-        return importlib.import_module(module_name)
-    except Exception as exc:
-        logger.debug("Failed to import %s: %s", module_name, exc)
-        return None
-    finally:
-        sys.path = original_path
+    with _SYS_PATH_LOCK:
+        original_path = sys.path.copy()
+        try:
+            if source_root not in sys.path:
+                sys.path.insert(0, source_root)
+            return importlib.import_module(module_name)
+        except Exception as exc:
+            logger.debug("Failed to import %s: %s", module_name, exc)
+            return None
+        finally:
+            sys.path = original_path
 
 
 def _enrich_param_from_inspect(
@@ -361,13 +408,11 @@ def _enrich_param_from_inspect(
     if inspect_param.default is not inspect.Parameter.empty:
         default = inspect_param.default
 
-    return ExtractedParam(
-        name=ast_param.name,
+    return replace(
+        ast_param,
         annotation=annotation,
         default=default,
         kind=_INSPECT_PARAM_KIND_MAP.get(inspect_param.kind, ast_param.kind),
-        description=ast_param.description,
-        inferred_type=ast_param.inferred_type,
     )
 
 
@@ -405,19 +450,11 @@ def _enrich_callable_from_inspect(
         except Exception:
             pass
 
-    return ExtractedCallable(
-        qualified_name=extracted.qualified_name,
-        kind=extracted.kind,
-        module_path=extracted.module_path,
-        class_name=extracted.class_name,
-        is_async=extracted.is_async,
+    return replace(
+        extracted,
         parameters=enriched_params,
         return_type=return_type,
         docstring=extracted.docstring or inspect.getdoc(runtime_obj),
-        is_inherited=extracted.is_inherited,
-        has_variadic=extracted.has_variadic,
-        decorators=extracted.decorators,
-        source_lines=extracted.source_lines,
     )
 
 
@@ -435,19 +472,9 @@ def _enrich_class_from_inspect(
             # Detect inheritance: check if method is defined in this class or inherited
             for base in runtime_class.__mro__[1:]:
                 if method_name in base.__dict__:
-                    enriched = ExtractedCallable(
-                        qualified_name=enriched.qualified_name,
-                        kind=enriched.kind,
-                        module_path=enriched.module_path,
-                        class_name=enriched.class_name,
-                        is_async=enriched.is_async,
-                        parameters=enriched.parameters,
-                        return_type=enriched.return_type,
-                        docstring=enriched.docstring,
+                    enriched = replace(
+                        enriched,
                         is_inherited=method_name not in runtime_class.__dict__,
-                        has_variadic=enriched.has_variadic,
-                        decorators=enriched.decorators,
-                        source_lines=enriched.source_lines,
                     )
                     break
             enriched_methods.append(enriched)
@@ -472,17 +499,11 @@ def _enrich_class_from_inspect(
         except (ValueError, TypeError):
             pass
 
-    return ExtractedClass(
-        name=extracted_class.name,
-        qualified_name=extracted_class.qualified_name,
-        module_path=extracted_class.module_path,
+    return replace(
+        extracted_class,
         docstring=extracted_class.docstring or inspect.getdoc(runtime_class),
-        bases=extracted_class.bases,
         methods=enriched_methods,
-        properties=extracted_class.properties,
         init_params=enriched_init_params,
-        decorators=extracted_class.decorators,
-        source_lines=extracted_class.source_lines,
     )
 
 
@@ -513,13 +534,11 @@ def _enrich_module_from_inspect(
         else:
             enriched_classes.append(cls)
 
-    return ExtractedModule(
-        module_path=extracted.module_path,
-        module_name=extracted.module_name,
+    return replace(
+        extracted,
         functions=enriched_functions,
         classes=enriched_classes,
         docstring=extracted.docstring or getattr(runtime_module, "__doc__", None),
-        all_exports=extracted.all_exports,
     )
 
 
@@ -538,65 +557,35 @@ def _enrich_with_docstrings(module: ExtractedModule) -> ExtractedModule:
         for p in c.parameters:
             desc = parsed.params.get(p.name)
             enriched_params.append(
-                ExtractedParam(
-                    name=p.name,
+                replace(
+                    p,
                     annotation=p.annotation or parsed.param_types.get(p.name),
-                    default=p.default,
-                    kind=p.kind,
                     description=desc or p.description,
-                    inferred_type=p.inferred_type,
                 )
             )
-        return ExtractedCallable(
-            qualified_name=c.qualified_name,
-            kind=c.kind,
-            module_path=c.module_path,
-            class_name=c.class_name,
-            is_async=c.is_async,
+        return replace(
+            c,
             parameters=enriched_params,
             return_type=c.return_type or parsed.returns_type,
-            docstring=c.docstring,
-            is_inherited=c.is_inherited,
-            has_variadic=c.has_variadic,
-            decorators=c.decorators,
-            source_lines=c.source_lines,
         )
 
     functions = [_enrich_callable_docstring(f) for f in module.functions]
-    classes = []
-    for cls in module.classes:
-        methods = [_enrich_callable_docstring(m) for m in cls.methods]
-        classes.append(
-            ExtractedClass(
-                name=cls.name,
-                qualified_name=cls.qualified_name,
-                module_path=cls.module_path,
-                docstring=cls.docstring,
-                bases=cls.bases,
-                methods=methods,
-                properties=cls.properties,
-                init_params=cls.init_params,
-                decorators=cls.decorators,
-                source_lines=cls.source_lines,
-            )
-        )
+    classes = [
+        replace(cls, methods=[_enrich_callable_docstring(m) for m in cls.methods])
+        for cls in module.classes
+    ]
 
-    return ExtractedModule(
-        module_path=module.module_path,
-        module_name=module.module_name,
-        functions=functions,
-        classes=classes,
-        docstring=module.docstring,
-        all_exports=module.all_exports,
-    )
+    return replace(module, functions=functions, classes=classes)
 
 
 def _enrich_with_type_inference(
     module: ExtractedModule,
-    source: str,
+    tree: ast.Module,
 ) -> ExtractedModule:
-    """Infer types for unannotated parameters using defaults and return statements."""
-    tree = ast.parse(source, filename=module.module_path)
+    """Infer types for unannotated parameters using defaults and return statements.
+
+    Reuses the already-parsed ``tree`` (no second ``ast.parse``).
+    """
 
     def _enrich_callable_types(c: ExtractedCallable) -> ExtractedCallable:
         enriched_params = []
@@ -604,64 +593,22 @@ def _enrich_with_type_inference(
             inferred = p.inferred_type
             if not p.annotation and not inferred:
                 inferred = infer_param_type_from_default(p.default)
-            enriched_params.append(
-                ExtractedParam(
-                    name=p.name,
-                    annotation=p.annotation,
-                    default=p.default,
-                    kind=p.kind,
-                    description=p.description,
-                    inferred_type=inferred or p.inferred_type,
-                )
-            )
+            enriched_params.append(replace(p, inferred_type=inferred or p.inferred_type))
 
         # Infer return type if not annotated
         return_type = c.return_type
         if not return_type:
             return_type = infer_return_type(tree, c.simple_name, c.class_name)
 
-        return ExtractedCallable(
-            qualified_name=c.qualified_name,
-            kind=c.kind,
-            module_path=c.module_path,
-            class_name=c.class_name,
-            is_async=c.is_async,
-            parameters=enriched_params,
-            return_type=return_type,
-            docstring=c.docstring,
-            is_inherited=c.is_inherited,
-            has_variadic=c.has_variadic,
-            decorators=c.decorators,
-            source_lines=c.source_lines,
-        )
+        return replace(c, parameters=enriched_params, return_type=return_type)
 
     functions = [_enrich_callable_types(f) for f in module.functions]
-    classes = []
-    for cls in module.classes:
-        methods = [_enrich_callable_types(m) for m in cls.methods]
-        classes.append(
-            ExtractedClass(
-                name=cls.name,
-                qualified_name=cls.qualified_name,
-                module_path=cls.module_path,
-                docstring=cls.docstring,
-                bases=cls.bases,
-                methods=methods,
-                properties=cls.properties,
-                init_params=cls.init_params,
-                decorators=cls.decorators,
-                source_lines=cls.source_lines,
-            )
-        )
+    classes = [
+        replace(cls, methods=[_enrich_callable_types(m) for m in cls.methods])
+        for cls in module.classes
+    ]
 
-    return ExtractedModule(
-        module_path=module.module_path,
-        module_name=module.module_name,
-        functions=functions,
-        classes=classes,
-        docstring=module.docstring,
-        all_exports=module.all_exports,
-    )
+    return replace(module, functions=functions, classes=classes)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -675,6 +622,9 @@ class SurfaceExtractor:
         source_root: Absolute path to the root of the Python source tree.
         use_inspect: Whether to perform the inspect pass (requires importing modules).
         exclude_patterns: Glob patterns for files to skip (e.g., "test_*", "*_test.py").
+        use_cache: Enable the disk extraction cache (off by default). Also honors
+            the SMARTER_MCP_EXTRACTION_CACHE / SMARTER_MCP_NO_CACHE env vars.
+        cache_dir: Where to store cache entries (defaults to .smarter-mcp/extraction-cache).
     """
 
     def __init__(
@@ -682,10 +632,16 @@ class SurfaceExtractor:
         source_root: str | Path,
         use_inspect: bool = True,
         exclude_patterns: list[str] | None = None,
+        use_cache: bool = False,
+        cache_dir: str | Path | None = None,
     ):
         self.source_root = Path(source_root).resolve()
         self.use_inspect = use_inspect
         self.exclude_patterns = exclude_patterns or ["test_*", "*_test.py", "conftest.py"]
+
+        self._cache: ExtractionCache | None = (
+            ExtractionCache(cache_dir) if cache_enabled(use_cache) else None
+        )
 
     def extract(self) -> ExtractionResult:
         """Run extraction on all Python files under source_root."""
@@ -715,24 +671,59 @@ class SurfaceExtractor:
         module_name: str = "<string>",
     ) -> ExtractedModule:
         """Extract from a source string directly (useful for testing)."""
-        module = _extract_module_ast(source, module_path, module_name)
+        tree = ast.parse(source, filename=module_path)
+        module = _extract_module_ast(tree, module_path, module_name)
         module = _enrich_with_docstrings(module)
-        module = _enrich_with_type_inference(module, source)
+        module = _enrich_with_type_inference(module, tree)
         return module
 
     def _discover_files(self) -> list[Path]:
-        """Find all Python files under source_root, respecting exclude patterns."""
-        files = []
-        for py_file in sorted(self.source_root.rglob("*.py")):
-            # Skip __pycache__ directories
-            if "__pycache__" in py_file.parts:
+        """Find all Python files under source_root.
+
+        Prunes virtual environments, installed dependencies, caches, and build
+        artifacts (see ``_is_pruned_dir`` and the ``pyvenv.cfg`` marker), then
+        applies the user-supplied exclude globs. Emits a loud warning if the
+        result set is unexpectedly large.
+        """
+        files: list[Path] = []
+
+        for dirpath, dirnames, filenames in os.walk(self.source_root):
+            current = Path(dirpath)
+
+            # Definitive virtual-env marker: never descend into a dir tree
+            # that contains a pyvenv.cfg (catches venvs with arbitrary names).
+            if current != self.source_root and (current / "pyvenv.cfg").exists():
+                dirnames[:] = []
                 continue
 
-            # Check exclude patterns
-            if self._is_excluded(py_file):
-                continue
+            # Prune excluded subdirectories in place so os.walk skips them.
+            dirnames[:] = [d for d in dirnames if not _is_pruned_dir(d)]
 
-            files.append(py_file)
+            for filename in filenames:
+                if not filename.endswith(".py"):
+                    continue
+                py_file = current / filename
+                # User-supplied exclude globs (e.g. test_*, *_test.py).
+                if self._is_excluded(py_file):
+                    continue
+                files.append(py_file)
+
+        files.sort()
+
+        if len(files) > _SCAN_FILE_WARN_THRESHOLD:
+            logger.warning(
+                "\n%s\n"
+                "  ⚠️  LARGE SCAN — %d Python files discovered under:\n"
+                "      %s\n\n"
+                "  This usually means the scan root is too broad (e.g. a whole\n"
+                "  project or home directory). Set 'source_root' to your package,\n"
+                "  or define 'sources' in a manifest, to scan only your code.\n"
+                "%s",
+                "=" * 72,
+                len(files),
+                self.source_root,
+                "=" * 72,
+            )
 
         return files
 
@@ -763,19 +754,35 @@ class SurfaceExtractor:
         return ".".join(parts) if parts else relative.stem
 
     def _extract_file(self, file_path: Path) -> ExtractedModule:
-        """Extract a single file through both passes."""
+        """Extract a single file through both passes (cached by content hash)."""
         source = file_path.read_text(encoding="utf-8")
         relative_path = str(file_path.relative_to(self.source_root))
         module_name = self._file_to_module_name(file_path)
 
-        # Pass 1: AST extraction
-        module = _extract_module_ast(source, relative_path, module_name)
+        if self._cache is not None:
+            cached = self._cache.get(source, module_name, self.use_inspect)
+            if cached is not None:
+                logger.debug("Extraction cache hit: %s", relative_path)
+                return cached
+            module = self._extract_from_source(source, relative_path, module_name)
+            self._cache.put(source, module_name, self.use_inspect, module)
+            return module
+
+        return self._extract_from_source(source, relative_path, module_name)
+
+    def _extract_from_source(
+        self, source: str, relative_path: str, module_name: str
+    ) -> ExtractedModule:
+        """Run both passes on a source string (parses the AST exactly once)."""
+        # Pass 1: AST extraction (single parse, reused by type inference)
+        tree = ast.parse(source, filename=relative_path)
+        module = _extract_module_ast(tree, relative_path, module_name)
 
         # Post-process: docstring enrichment
         module = _enrich_with_docstrings(module)
 
-        # Post-process: type inference
-        module = _enrich_with_type_inference(module, source)
+        # Post-process: type inference (reuses the parsed tree)
+        module = _enrich_with_type_inference(module, tree)
 
         # Pass 2: inspect enrichment (optional)
         if self.use_inspect:

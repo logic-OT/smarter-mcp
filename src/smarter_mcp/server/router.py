@@ -18,8 +18,8 @@ from typing import Any, Callable
 
 from fastmcp import FastMCP
 
-from faster_mcp.config.manifest import ManifestConfig, RoutingConfig
-from faster_mcp._registry import ToolRegistry, RegisteredTool, RegisteredResource
+from smarter_mcp.config.manifest import ManifestConfig, RoutingConfig, ToolOverride
+from smarter_mcp._registry import ToolRegistry, RegisteredTool, RegisteredResource
 
 logger = logging.getLogger(__name__)
 
@@ -109,15 +109,21 @@ class NamespaceRouter:
         self.instance_manager = instance_manager
         self._root: FastMCP | None = None
         self._namespaces: dict[str, FastMCP] = {}
+        # O(1) override lookup, keyed by ToolOverride.function (built once).
+        self._override_index: dict[str, ToolOverride] = {
+            override.function: override for override in config.tools
+        }
 
     def build_server(
         self,
         registry: ToolRegistry,
+        auth: Any | None = None,
     ) -> FastMCP:
         """Build the complete FastMCP server from the registry.
 
         Args:
             registry: The central tool registry.
+            auth: Optional FastMCP auth provider (Bearer token verifier).
 
         Returns:
             Root FastMCP server with all namespaces mounted.
@@ -125,6 +131,7 @@ class NamespaceRouter:
         self._root = FastMCP(
             name=self.config.name,
             instructions=self.config.description or f"{self.config.name} MCP Server",
+            auth=auth,
         )
 
         for ns_name in registry.get_all_namespaces():
@@ -173,22 +180,21 @@ class NamespaceRouter:
         tool_name = _build_tool_name(tool, self.routing.separator)
         description = _build_tool_description(tool)
 
-        # Check for manifest tool overrides
-        for override in self.config.tools:
-            # We match by qualified name if extracted_obj is present, else by simple name
-            qual_name = tool.extracted_obj.qualified_name if tool.extracted_obj else tool.name
-            if override.function == qual_name or override.function == tool.name:
-                if not override.expose:
-                    return False
-                if override.name:
-                    tool_name = override.name
-                if override.description:
-                    description = override.description
-                break
+        # Check for manifest tool overrides (O(1) via the prebuilt index).
+        # Match by qualified name if extracted_obj is present, else by simple name.
+        qual_name = tool.extracted_obj.qualified_name if tool.extracted_obj else tool.name
+        override = self._override_index.get(qual_name) or self._override_index.get(tool.name)
+        if override is not None:
+            if not override.expose:
+                return False
+            if override.name:
+                tool_name = override.name
+            if override.description:
+                description = override.description
 
         impl = tool.fn
         
-        from faster_mcp.runtime.tool_wrapper import build_tool_wrapper
+        from smarter_mcp.runtime.tool_wrapper import build_tool_wrapper
         impl = build_tool_wrapper(tool, impl, self.instance_manager)
 
         # Register with FastMCP

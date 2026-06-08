@@ -7,19 +7,19 @@ and serializability.
 """
 
 import pytest
-from faster_mcp import FasterMCP
+from smarter_mcp import SmarterMCP, tool
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Helpers: set up a FasterMCP app with various tool shapes
+# Helpers: set up a SmarterMCP app with various tool shapes
 # ──────────────────────────────────────────────────────────────────────
 
-def _build_app() -> FasterMCP:
-    """Create a FasterMCP app with a mix of tools for testing."""
-    app = FasterMCP(name="test-server")
+def _build_app() -> SmarterMCP:
+    """Create a SmarterMCP app with a mix of tools for testing."""
+    app = SmarterMCP(name="test-server")
 
     # 1. Simple passing tool with exact-match test case
-    @app.tool(
+    @tool(
         description="Greet a user by name",
         tests=[
             {"params": {"name": "Alice"}, "expect": "Hello, Alice!"},
@@ -30,7 +30,7 @@ def _build_app() -> FasterMCP:
         return f"Hello, {name}!"
 
     # 2. Tool with expect_type check
-    @app.tool(
+    @tool(
         description="Add two numbers",
         tests=[
             {"params": {"a": 2, "b": 3}, "expect": 5, "expect_type": "int"},
@@ -40,7 +40,7 @@ def _build_app() -> FasterMCP:
         return a + b
 
     # 3. Tool that deliberately raises an exception
-    @app.tool(
+    @tool(
         description="Always fails",
         tests=[
             {"params": {"x": 1}},
@@ -50,12 +50,12 @@ def _build_app() -> FasterMCP:
         raise ValueError("Intentional failure")
 
     # 4. Tool with no test cases defined (should be skipped)
-    @app.tool(description="No tests defined")
+    @tool(description="No tests defined")
     def no_tests(value: str) -> str:
         return value
 
     # 5. Tool whose return doesn't match expect
-    @app.tool(
+    @tool(
         description="Returns wrong value",
         tests=[
             {"params": {"x": 1}, "expect": 999},
@@ -65,7 +65,7 @@ def _build_app() -> FasterMCP:
         return x + 1
 
     # 6. Tool with wrong return type
-    @app.tool(
+    @tool(
         description="Returns a string, not an int",
         tests=[
             {"params": {"x": 1}, "expect_type": "int"},
@@ -75,7 +75,7 @@ def _build_app() -> FasterMCP:
         return str(x)
 
     # 7. Async tool
-    @app.tool(
+    @tool(
         description="Async greeting",
         tests=[
             {"params": {"name": "Async"}, "expect": "Hi, Async!"},
@@ -85,7 +85,7 @@ def _build_app() -> FasterMCP:
         return f"Hi, {name}!"
 
     # 8. Tool that returns a non-serializable object
-    @app.tool(
+    @tool(
         description="Returns a set (not JSON-serializable natively)",
         tests=[
             {"params": {}},
@@ -102,7 +102,7 @@ def _build_app() -> FasterMCP:
 # ──────────────────────────────────────────────────────────────────────
 
 class TestToolTestingFramework:
-    """Tests for the FasterMCP.test() method and ToolTestRunner."""
+    """Tests for the SmarterMCP.test() method and ToolTestRunner."""
 
     def setup_method(self):
         """Create a fresh app for each test."""

@@ -6,12 +6,13 @@ and run them to verify tools are alive, callable, and returning expected results
 before an agent ever touches them.
 
 Usage:
-    app = FasterMCP("my-server")
+    from smarter_mcp import tool, SmarterMCP
 
-    @app.tool(tests=[{"params": {"name": "Alice"}, "expect": "Hello, Alice!"}])
+    @tool(description="Greet someone", tests=[{"params": {"name": "Alice"}, "expect": "Hello, Alice!"}])
     def greet(name: str) -> str:
         return f"Hello, {name}!"
 
+    app = SmarterMCP("my-server")
     report = app.test()              # run all predefined tests
     report = app.test("greet")       # run tests for one tool
     report = app.test("greet", params={"name": "Bob"})  # ad-hoc test
@@ -27,8 +28,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from faster_mcp._registry import RegisteredTool, ToolRegistry
-from faster_mcp._schema import build_json_schema
+from smarter_mcp._registry import RegisteredTool, ToolRegistry
+from smarter_mcp._schema import build_json_schema
 
 logger = logging.getLogger(__name__)
 

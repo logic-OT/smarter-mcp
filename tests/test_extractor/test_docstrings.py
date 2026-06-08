@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from faster_mcp.extractor.docstrings import detect_format, parse_docstring
-from faster_mcp.extractor.models import DocstringFormat
+from smarter_mcp.extractor.docstrings import detect_format, parse_docstring
+from smarter_mcp.extractor.models import DocstringFormat
 
 
 class TestFormatDetection:

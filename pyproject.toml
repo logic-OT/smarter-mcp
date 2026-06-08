@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "faster-mcp"
+name = "smarter-mcp"
 version = "0.1.0"
 description = "Turn any Python codebase into a production-grade MCP server with zero friction."
 readme = "README.md"
@@ -31,10 +31,10 @@ dependencies = [
     "pyyaml>=6.0",
     "jinja2>=3.0",
     "structlog>=23.0",
+    "openai>=1.0",
 ]
 
 [project.optional-dependencies]
-llm = ["openai>=1.0"]
 multimodal = ["Pillow>=10.0", "numpy>=1.24"]
 dev = [
     "pytest>=8.0",
@@ -42,17 +42,17 @@ dev = [
     "watchfiles>=0.20",
     "ruff>=0.4",
 ]
-all = ["faster-mcp[llm,multimodal,dev]"]
+all = ["smarter-mcp[multimodal,dev]"]
 
 [project.scripts]
-faster-mcp = "faster_mcp.cli.main:cli"
+smarter-mcp = "smarter_mcp.cli.main:cli"
 
 [project.urls]
-Homepage = "https://github.com/minoHealth/faster-mcp"
-Repository = "https://github.com/minoHealth/faster-mcp"
+Homepage = "https://github.com/minoHealth/smarter-mcp"
+Repository = "https://github.com/minoHealth/smarter-mcp"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/faster_mcp"]
+packages = ["src/smarter_mcp"]
 
 [tool.ruff]
 target-version = "py310"

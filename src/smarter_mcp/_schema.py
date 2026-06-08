@@ -14,7 +14,7 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable
 
-from faster_mcp._registry import RegisteredTool
+from smarter_mcp._registry import RegisteredTool
 
 
 # Maps Python type annotation strings to JSON Schema type names.
@@ -27,6 +27,10 @@ _TYPE_MAP: dict[str, str] = {
     "dict": "object",
     "None": "null",
     "bytes": "string",
+    "PIL.Image.Image": "string",
+    "Image": "string",
+    "ndarray": "string",
+    "numpy.ndarray": "string",
 }
 
 
@@ -63,16 +67,29 @@ def _schema_from_extracted(tool: RegisteredTool) -> dict[str, Any]:
 
         # Resolve the JSON type from the Python type annotation
         effective_type = param.effective_type
+        is_multimodal = False
         if effective_type:
             # Strip generics and unions to get the base type name
             base_type = effective_type.split("[")[0].split("|")[0].strip()
             prop["type"] = _TYPE_MAP.get(base_type, "string")
+            base_lower = base_type.lower()
+            if "pil.image" in base_lower or "image.image" in base_lower or "ndarray" in base_lower or "numpy.ndarray" in base_lower or base_lower in ("image", "pil_image"):
+                is_multimodal = True
         else:
             prop["type"] = "string"
 
         # Per-parameter description from docstring parsing
         if param.description:
             prop["description"] = param.description
+
+        if is_multimodal:
+            prop["type"] = "string"
+            desc_hint = "File path or remote URL to the image"
+            if prop.get("description"):
+                if desc_hint not in prop["description"]:
+                    prop["description"] = f"{prop['description']} ({desc_hint})"
+            else:
+                prop["description"] = desc_hint
 
         # Default value
         if param.has_default and param.default is not None:
@@ -114,6 +131,7 @@ def _schema_from_signature(fn: Callable) -> dict[str, Any]:
         prop: dict[str, Any] = {}
 
         # Resolve type annotation → JSON Schema type
+        is_multimodal = False
         if param.annotation != inspect.Parameter.empty:
             type_name = (
                 param.annotation.__name__
@@ -121,8 +139,20 @@ def _schema_from_signature(fn: Callable) -> dict[str, Any]:
                 else str(param.annotation)
             )
             prop["type"] = _TYPE_MAP.get(type_name, "string")
+            type_lower = type_name.lower()
+            if "pil.image" in type_lower or "image.image" in type_lower or "ndarray" in type_lower or "numpy.ndarray" in type_lower or type_lower in ("image", "pil_image"):
+                is_multimodal = True
         else:
             prop["type"] = "string"
+
+        if is_multimodal:
+            prop["type"] = "string"
+            desc_hint = "File path or remote URL to the image"
+            if prop.get("description"):
+                if desc_hint not in prop["description"]:
+                    prop["description"] = f"{prop['description']} ({desc_hint})"
+            else:
+                prop["description"] = desc_hint
 
         # Default value
         if param.default != inspect.Parameter.empty:

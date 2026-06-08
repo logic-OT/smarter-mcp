@@ -1,4 +1,4 @@
-# Faster-MCP — Specification
+# Smarter-MCP — Specification
 
 > The highest-level Python framework for building and generating MCP servers.
 
@@ -6,15 +6,15 @@
 
 ## Philosophy
 
-FastMCP gives you primitives. Faster-MCP gives you **abstractions**.
+FastMCP gives you primitives. Smarter-MCP gives you **abstractions**.
 
-The difference is the same as PyTorch vs Keras, or LangChain vs Agno. Faster-MCP sits on top of FastMCP and handles everything the developer shouldn't have to think about: signature extraction, type coercion, instance lifecycle, namespace routing, multimodal encoding, and structured error handling.
+The difference is the same as PyTorch vs Keras, or LangChain vs Agno. Smarter-MCP sits on top of FastMCP and handles everything the developer shouldn't have to think about: signature extraction, type coercion, instance lifecycle, namespace routing, multimodal encoding, and structured error handling.
 
 **Two core principles:**
 
-1. **If you own the code** — write clean, decorated Python. Faster-MCP gives you `@app.tool()`, `@app.toolkit()`, and `@app.resource()` decorators that plug into a powerful runtime with session-scoped instances, automatic type coercion, and multimodal support.
+1. **If you own the code** — write clean, decorated Python. Smarter-MCP gives you `@tool`, `@toolkit`, and `@resource` standalone decorators that plug into a powerful runtime with session-scoped instances, automatic type coercion, and multimodal support.
 
-2. **If you don't own the code** — point Faster-MCP at it. Pass an imported module object, a directory path, or a YAML manifest. The dual-pass extraction engine (AST + inspect) handles the rest — no source modifications required.
+2. **If you don't own the code** — point Smarter-MCP at it. Pass an imported module object, a directory path, or a YAML manifest. The dual-pass extraction engine (AST + inspect) handles the rest — no source modifications required.
 
 Both paths converge into the same runtime engine. Every tool gets the same production-grade treatment regardless of how it was registered.
 
@@ -22,7 +22,7 @@ Both paths converge into the same runtime engine. Every tool gets the same produ
 
 ## The Four Entry Points
 
-Faster-MCP provides four ways to register MCP tools. All four funnel into a single `ToolRegistry`, which feeds the runtime pipeline and server.
+Smarter-MCP provides four ways to register MCP tools. All four funnel into a single `ToolRegistry`, which feeds the runtime pipeline and server.
 
 ### 1. Decorators — for writing new tools
 
@@ -31,15 +31,15 @@ When you're authoring MCP tools from scratch, decorators give you the cleanest p
 **Simple function tools:**
 
 ```python
-from faster_mcp import FasterMCP
+from smarter_mcp import SmarterMCP, tool
 
-app = FasterMCP("my-server")
+app = SmarterMCP("my-server")
 
-@app.tool(description="Greet a user by name")
+@tool("Greet a user by name")
 def greet(name: str) -> str:
     return f"Hello, {name}!"
 
-@app.tool()  # description auto-extracted from docstring
+@tool()  # description auto-extracted from docstring
 async def fetch_data(url: str, timeout: int = 30) -> dict:
     """Fetch JSON data from a URL."""
     async with httpx.AsyncClient() as client:
@@ -52,23 +52,25 @@ app.run()
 **Class-based toolkits** — for stateful tools (DB clients, API wrappers, ML pipelines):
 
 ```python
-@app.toolkit(lifecycle="session")
+from smarter_mcp import tool, toolkit
+
+@toolkit(lifecycle="session")
 class DatabaseClient:
     def __init__(self, host: str = "localhost", port: int = 5432):
         self.conn = connect(host, port)
 
-    @app.tool(name="run_query")
+    @tool(name="run_query")
     def query(self, sql: str) -> list[dict]:
         """Execute a SQL query and return results."""
         return self.conn.execute(sql).fetchall()
 
-    @app.tool()
+    @tool()
     def list_tables(self) -> list[str]:
         """List all tables in the database."""
         return self.conn.get_tables()
 ```
 
-The `@app.toolkit()` decorator handles:
+The `@toolkit()` decorator handles:
 - Automatic class instantiation with the specified lifecycle (session, singleton, or per-call)
 - `self` binding on every tool call — each MCP session gets its own instance
 - Constructor argument injection from decorator kwargs or environment variables
@@ -77,7 +79,9 @@ The `@app.toolkit()` decorator handles:
 **Resources:**
 
 ```python
-@app.resource("config://settings")
+from smarter_mcp import resource
+
+@resource("config://settings")
 def get_settings() -> dict:
     return {"debug": True, "version": "1.0"}
 ```
@@ -86,7 +90,7 @@ def get_settings() -> dict:
 
 ### 2. `discover_module()` — expose any imported Python module
 
-The killer feature. Import any module — stdlib, pip package, or local file — and hand it to Faster-MCP. It extracts the functions, builds schemas, and serves them as MCP tools.
+The killer feature. Import any module — stdlib, pip package, or local file — and hand it to Smarter-MCP. It extracts the functions, builds schemas, and serves them as MCP tools.
 
 ```python
 import random
@@ -94,7 +98,7 @@ import json
 from rdkit.Chem import Descriptors
 import my_local_utils
 
-app = FasterMCP("multi-tools")
+app = SmarterMCP("multi-tools")
 
 # Stdlib
 app.discover_module(random, include=["choices", "randint", "sample"])
@@ -132,13 +136,15 @@ app.run()
 For scanning an entire local codebase. This is the original zero-touch auto-discovery mode.
 
 ```python
-app = FasterMCP("my-library-server")
+app = SmarterMCP("my-library-server")
 
 # Scan a directory
 app.discover("./src/mylib", exclude=["test_*", "_internal*"])
 
 # Mix with decorator tools on top
-@app.tool(description="Custom scoring function")
+from smarter_mcp import tool
+
+@tool("Custom scoring function")
 def custom_score(data: dict) -> float:
     ...
 
@@ -159,7 +165,7 @@ app.run()
 
 **Class instantiation model** (for auto-discovered classes):
 
-When a class method is exposed via auto-discovery, Faster-MCP needs an instance to call it on. Three strategies, in order of precedence:
+When a class method is exposed via auto-discovery, Smarter-MCP needs an instance to call it on. Three strategies, in order of precedence:
 
 1. **Config-defined** (explicit): the manifest or `discover()` kwargs declare constructor args
 2. **Singleton factory** (convention): a module-level function named `get_<ClassName>()` or `create_<ClassName>()` is detected and used automatically
@@ -169,7 +175,7 @@ Instance lifecycle is session-scoped by default: one instance per MCP session, c
 
 **Name collision resolution:**
 
-When two classes expose a method with the same name, Faster-MCP defaults to `ClassName_method_name` namespacing. Configurable per-tool in the manifest.
+When two classes expose a method with the same name, Smarter-MCP defaults to `ClassName_method_name` namespacing. Configurable per-tool in the manifest.
 
 **Property → Resource mapping:**
 
@@ -179,28 +185,28 @@ When two classes expose a method with the same name, Faster-MCP defaults to `Cla
 
 ### 4. CLI — zero-code, YAML-driven
 
-For operational use — no Python code needed. Configure everything in `faster-mcp.yaml`.
+For operational use — no Python code needed. Configure everything in `smarter-mcp.yaml`.
 
 **Commands:**
 
 ```bash
 # Auto-discover a local directory
-faster-mcp serve ./mylib
+smarter-mcp serve ./mylib
 
 # Use a manifest
-faster-mcp serve --manifest faster-mcp.yaml
+smarter-mcp serve --manifest smarter-mcp.yaml
 
 # Run a decorator-based Python file directly
-faster-mcp serve ./server.py
+smarter-mcp serve ./server.py
 
 # Validate manifest without starting the server
-faster-mcp validate
+smarter-mcp validate
 
 # Generate a starter manifest from a codebase
-faster-mcp init ./mylib
+smarter-mcp init ./mylib
 
 # Export as standalone pip-installable package
-faster-mcp export --output ./dist --package-name mylib-mcp
+smarter-mcp export --output ./dist --package-name mylib-mcp
 ```
 
 **YAML Manifest:**
@@ -289,7 +295,7 @@ llm:
   cache: true
 ```
 
-**CLI auto-detection:** When `faster-mcp serve ./server.py` is called and the file contains a `FasterMCP` instance, the CLI imports the file and runs that instance directly — supporting decorator-based servers from the command line.
+**CLI auto-detection:** When `smarter-mcp serve ./server.py` is called and the file contains a `SmarterMCP` instance, the CLI imports the file and runs that instance directly — supporting decorator-based servers from the command line.
 
 ---
 
@@ -298,17 +304,16 @@ llm:
 The `ToolRegistry` is the unification point. All four entry points write into it. The server layer reads from it.
 
 ```
-                    ┌─ @app.tool() ────────────────┐
-                    │  @app.resource() ─────────────┤
-Developer Code ─────┤  @app.toolkit() ──────────────┤──→ ToolRegistry ──→ Router ──→ FastMCP
-                    │  app.add_tool(fn) ────────────┤
-                    └───────────────────────────────┘
+                    ┌─ @tool ──────────────────────┐
+                    │  @resource ──────────────────┤
+Developer Code ─────┤  @toolkit ───────────────────┤──→ ToolRegistry ──→ Router ──→ FastMCP
+                    └──────────────────────────────┘
                                                      ↑
 app.discover_module(mod) ──→ Inspect Extract ────────┤
                                                      │
 app.discover("./path") ────→ AST + Inspect Extract ──┤
                                                      │
-faster-mcp.yaml ───────────→ AST + Inspect Extract ──┘
+smarter-mcp.yaml ───────────→ AST + Inspect Extract ──┘
 ```
 
 **Why this matters:** A developer can mix all four entry points in a single server. Auto-discover a legacy library, add a few hand-written decorator tools, and expose some stdlib utilities — all served from one endpoint. If a conflict arises (same tool name), decorator registration wins with a warning logged.
@@ -357,7 +362,7 @@ Every tool — regardless of how it was registered — passes through the same r
 
 ## Multimodal Support
 
-Faster-MCP detects and correctly handles multimodal content in both directions — functions that *return* images/audio and functions that *accept* them.
+Smarter-MCP detects and correctly handles multimodal content in both directions — functions that *return* images/audio and functions that *accept* them.
 
 ### Output Detection (function returns → MCP content)
 
@@ -378,18 +383,18 @@ Faster-MCP detects and correctly handles multimodal content in both directions �
 
 ### Input Detection (MCP content → function parameters)
 
-This is the harder problem: how does Faster-MCP know that a function *accepts* multimodal input, especially for auto-discovered modules?
+This is the harder problem: how does Smarter-MCP know that a function *accepts* multimodal input, especially for auto-discovered modules?
 
 **Detection strategy (in priority order):**
 
-| Signal | Example | How Faster-MCP uses it |
+| Signal | Example | How Smarter-MCP uses it |
 |---|---|---|
 | Type annotation | `image: PIL.Image.Image` | Knows to decode incoming `ImageContent` to a PIL Image |
 | Type annotation | `data: np.ndarray` | Decodes `ImageContent` to numpy array |
 | Type annotation | `audio: bytes` | Passes raw bytes from `BlobContent` |
 | `Annotated` hint | `Annotated[bytes, "image/png"]` | Knows the MIME type to expect |
 | Parameter name | `image`, `img`, `photo`, `frame` | Heuristic: likely accepts an image |
-| Decorator explicit | `@app.tool(inputs={"scan": "image"})` | Developer declares it |
+| Decorator explicit | `@tool(inputs={"scan": "image"})` | Developer declares it |
 | Manifest override | `parameters: scan: {type: image}` | YAML declares it |
 
 **How it works at runtime:**
@@ -406,7 +411,9 @@ ImageContent (base64) ──→ PIL.Image.Image  (if param: PIL.Image.Image)
 **Decorator example:**
 
 ```python
-@app.tool()
+from smarter_mcp import tool
+
+@tool()
 def classify_image(image: PIL.Image.Image, top_k: int = 5) -> list[str]:
     """Classify an image and return top-k labels."""
     ...
@@ -421,7 +428,7 @@ def detect_faces(img: np.ndarray, min_confidence: float = 0.8) -> list[dict]:
     ...
 ```
 
-Faster-MCP sees `img: np.ndarray`, recognizes this as a multimodal input, and automatically wires up the `ImageContent` → `np.ndarray` conversion. The agent can send an image and it just works.
+Smarter-MCP sees `img: np.ndarray`, recognizes this as a multimodal input, and automatically wires up the `ImageContent` → `np.ndarray` conversion. The agent can send an image and it just works.
 
 **When auto-detection fails** (e.g., `data: bytes` with no annotation hint), the parameter is treated as a regular string/base64. The developer can override this in the manifest or with decorator kwargs.
 
@@ -433,9 +440,9 @@ Faster-MCP sees `img: np.ndarray`, recognizes this as a multimodal input, and au
 
 ## Lightweight Core
 
-Faster-MCP's core is intentionally lean. Heavy dependencies are optional extras — you only install what you use.
+Smarter-MCP's core is intentionally lean. Heavy dependencies are optional extras — you only install what you use.
 
-**Core install** (`pip install faster-mcp`):
+**Core install** (`pip install smarter-mcp`):
 
 | Dependency | Size | Why |
 |---|---|---|
@@ -450,12 +457,12 @@ Faster-MCP's core is intentionally lean. Heavy dependencies are optional extras 
 **Optional extras:**
 
 ```bash
-pip install faster-mcp[multimodal]   # +Pillow (~60MB), +numpy (~30MB)
-pip install faster-mcp[llm]          # +openai (~1MB)
-pip install faster-mcp[all]          # everything
+pip install smarter-mcp[multimodal]   # +Pillow (~60MB), +numpy (~30MB)
+pip install smarter-mcp[llm]          # +openai (~1MB)
+pip install smarter-mcp[all]          # everything
 ```
 
-**Lazy imports:** Faster-MCP never imports `PIL`, `numpy`, or `openai` at module load time. These are imported only when a tool that needs them is actually registered or called. If `Pillow` isn't installed and no tool uses images, nothing breaks. If a tool *does* return a `PIL.Image` but Pillow isn't installed, a clear error tells the developer to `pip install faster-mcp[multimodal]`.
+**Lazy imports:** Smarter-MCP never imports `PIL`, `numpy`, or `openai` at module load time. These are imported only when a tool that needs them is actually registered or called. If `Pillow` isn't installed and no tool uses images, nothing breaks. If a tool *does* return a `PIL.Image` but Pillow isn't installed, a clear error tells the developer to `pip install smarter-mcp[multimodal]`.
 
 ---
 
@@ -498,7 +505,7 @@ server:
 Any configuration that produces a working server can be exported as a standalone pip-installable Python package.
 
 ```bash
-faster-mcp export --output ./dist --package-name mylib-mcp --version 0.1.0
+smarter-mcp export --output ./dist --package-name mylib-mcp --version 0.1.0
 ```
 
 **The exported package:**
@@ -520,7 +527,7 @@ mylib-mcp/
       _manifest.yaml         # embedded config
 ```
 
-- Has no dependency on Faster-MCP itself at runtime (only `mcp` and `fastmcp`)
+- Has no dependency on Smarter-MCP itself at runtime (only `mcp` and `fastmcp`)
 - Preserves all instance lifecycle logic
 - Is importable as a library or runnable as `python -m mylib_mcp`
 
@@ -528,12 +535,14 @@ mylib-mcp/
 
 ## Tool Testing
 
-Every registered tool can have test cases defined alongside it. Faster-MCP runs them to verify tools are alive, callable, and returning expected results — before an agent ever touches them.
+Every registered tool can have test cases defined alongside it. Smarter-MCP runs them to verify tools are alive, callable, and returning expected results — before an agent ever touches them.
 
 ### Defining test params with decorators
 
 ```python
-@app.tool(
+from smarter_mcp import tool, toolkit
+
+@tool(
     description="Greet a user",
     tests=[
         {"params": {"name": "Alice"}, "expect": "Hello, Alice!"},
@@ -543,12 +552,12 @@ Every registered tool can have test cases defined alongside it. Faster-MCP runs 
 def greet(name: str) -> str:
     return f"Hello, {name}!"
 
-@app.toolkit(lifecycle="session")
+@toolkit(lifecycle="session")
 class DatabaseClient:
     def __init__(self, host: str = "localhost"):
         self.conn = connect(host)
 
-    @app.tool(
+    @tool(
         tests=[{"params": {"sql": "SELECT 1"}}]
     )
     def query(self, sql: str) -> list[dict]:
@@ -600,16 +609,16 @@ results = app.test(verbose=True)
 
 ```bash
 # Test all tools (runs predefined test cases)
-faster-mcp test
+smarter-mcp test
 
 # Test a specific tool
-faster-mcp test --tool greet
+smarter-mcp test --tool greet
 
 # Test with custom params from the command line
-faster-mcp test --tool greet --params '{"name": "Alice"}'
+smarter-mcp test --tool greet --params '{"name": "Alice"}'
 
 # Verbose output (show return values, latency)
-faster-mcp test --verbose
+smarter-mcp test --verbose
 ```
 
 ### What each test checks
@@ -627,7 +636,7 @@ faster-mcp test --verbose
 ### Example output
 
 ```
-$ faster-mcp test --verbose
+$ smarter-mcp test --verbose
 
 Testing 8 tools across 3 namespaces...
 
@@ -648,41 +657,41 @@ Testing 8 tools across 3 namespaces...
 Results: 6 passed, 1 failed, 1 skipped
 ```
 
-**Why this matters:** You can run `faster-mcp test` in CI/CD. When an upstream library updates and breaks a function signature, your MCP server tests catch it before deployment. No other MCP framework has this.
+**Why this matters:** You can run `smarter-mcp test` in CI/CD. When an upstream library updates and breaks a function signature, your MCP server tests catch it before deployment. No other MCP framework has this.
 
 ---
 
 ## Additional Features
 
-**Hot reload in dev mode.** `faster-mcp serve --dev` watches source files and reloads tools without restarting the server.
+**Hot reload in dev mode.** `smarter-mcp serve --dev` watches source files and reloads tools without restarting the server.
 
-**Dry-run mode.** `faster-mcp validate` checks the manifest, resolves all functions, reports what would be exposed and what would be skipped, and why. No server starts.
+**Dry-run mode.** `smarter-mcp validate` checks the manifest, resolves all functions, reports what would be exposed and what would be skipped, and why. No server starts.
 
-**Type inference for unannotated code.** For functions without type annotations, Faster-MCP infers types from default values, return statements, and docstring type hints (NumPy/Google/Sphinx style). Inferred types are marked as such in the schema.
+**Type inference for unannotated code.** For functions without type annotations, Smarter-MCP infers types from default values, return statements, and docstring type hints (NumPy/Google/Sphinx style). Inferred types are marked as such in the schema.
 
 **Docstring extraction.** NumPy-style, Google-style, Sphinx-style, and plain docstrings are all parsed to extract per-parameter descriptions.
 
-**`faster-mcp init` scaffold.** Inspects a codebase and generates a starting manifest with all detected functions, classes, and suggested configuration.
+**`smarter-mcp init` scaffold.** Inspects a codebase and generates a starting manifest with all detected functions, classes, and suggested configuration.
 
 ---
 
-## What Faster-MCP Is Not
+## What Smarter-MCP Is Not
 
 - **Not multi-language.** Python only for MVP.
-- **Not a managed service.** Faster-MCP produces a server you run.
-- **Not a replacement for FastMCP.** Faster-MCP is built on top of FastMCP. It adds the abstractions — extraction, lifecycle, coercion, routing — that FastMCP leaves to the developer.
+- **Not a managed service.** Smarter-MCP produces a server you run.
+- **Not a replacement for FastMCP.** Smarter-MCP is built on top of FastMCP. It adds the abstractions — extraction, lifecycle, coercion, routing — that FastMCP leaves to the developer.
 
 ---
 
 ## Gap Summary vs FastMCP
 
-| Capability | FastMCP | Faster-MCP |
+| Capability | FastMCP | Smarter-MCP |
 |---|---|---|
-| Decorator API | `@mcp.tool()` (manual wiring) | `@app.tool()` with auto coercion, schema, multimodal |
-| Class toolkits | Manual `add_tool()` per method | `@app.toolkit()` with session-scoped instances |
+| Decorator API | `@mcp.tool()` (manual wiring) | `@tool` with auto coercion, schema, multimodal |
+| Class toolkits | Manual `add_tool()` per method | `@toolkit` with session-scoped instances |
 | Expose existing modules | Not supported | `app.discover_module(random)` |
 | Auto-discover codebase | Not supported | `app.discover("./mylib")` |
-| CLI / YAML config | Not supported | `faster-mcp serve`, full manifest |
+| CLI / YAML config | Not supported | `smarter-mcp serve`, full manifest |
 | Instance lifecycle | Manual | session / singleton / per-call, auto-managed |
 | Type coercion | None | `"42"` → `42` automatically |
 | Namespace routing | Manual `mount()` | Auto-derived from module paths |
@@ -692,7 +701,7 @@ Results: 6 passed, 1 failed, 1 skipped
 | Docstring parsing | Raw docstring only | Google/NumPy/Sphinx parsed per-parameter |
 | Type inference | None | AST-based inference from defaults + returns |
 | Error handling | Raw Python tracebacks | Structured MCP error objects |
-| Package export | Not supported | `faster-mcp export` → standalone package |
+| Package export | Not supported | `smarter-mcp export` → standalone package |
 | `*args/**kwargs` | Silent runtime failure | Detected, skipped with warning |
 | Schema validation | None | Every call validated against JSON schema |
 

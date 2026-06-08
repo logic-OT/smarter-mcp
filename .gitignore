@@ -27,3 +27,8 @@ htmlcov/
 
 # Tools
 .ruff_cache/
+
+# Smarter-MCP runtime artifacts (extraction cache, LLM description cache)
+.smarter-mcp/
+/tests
+/docs/superpowers

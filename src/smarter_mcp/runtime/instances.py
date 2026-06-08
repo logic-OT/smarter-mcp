@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from fastmcp import Context
 
-from faster_mcp.config.manifest import InstanceConfig
+from smarter_mcp.config.manifest import InstanceConfig
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,9 @@ class InstanceManager:
         """
         self._configs = {c.class_name: c for c in configs}
         self._singletons: dict[str, Any] = {}
-        # Session cache is managed via Context.request_context in the wrappers
+        # session_id → {class_name → instance}; keyed by the MCP session ID so
+        # the same instance is reused across all tool calls within one connection.
+        self._session_instances: dict[str, dict[str, Any]] = {}
 
     def add_config(self, class_name: str, lifecycle: str = "session", args: dict[str, Any] | None = None) -> None:
         """Programmatically add an instance configuration."""
@@ -89,25 +91,29 @@ class InstanceManager:
     ) -> Any:
         """Get or create a session-scoped instance.
 
-        Uses the FastMCP Context to store instances per-connection.
+        Keyed by the MCP session ID, which is stable for the lifetime of a
+        single client connection. Falls back to per-call when no context is
+        available (e.g., direct invocation outside MCP).
         """
         if ctx is None:
-            # Fallback if no context is provided (e.g., direct call outside MCP)
             logger.warning(
                 "No context provided for session-scoped class %s, falling back to per-call.",
                 class_name,
             )
             return self._create_instance(class_name, cls_obj, config)
 
-        # Ensure the request context has our store
-        if not hasattr(ctx.request_context, "faster_mcp_instances"):
-            ctx.request_context.faster_mcp_instances = {}
+        # Prefer the stable session/client ID; fall back to object identity so
+        # we always get a key even if FastMCP changes the Context API.
+        session_id = str(
+            getattr(ctx, "session_id", None)
+            or getattr(ctx, "client_id", None)
+            or id(ctx)
+        )
+        session_store = self._session_instances.setdefault(session_id, {})
+        if class_name not in session_store:
+            session_store[class_name] = self._create_instance(class_name, cls_obj, config)
 
-        store = ctx.request_context.faster_mcp_instances
-        if class_name not in store:
-            store[class_name] = self._create_instance(class_name, cls_obj, config)
-
-        return store[class_name]
+        return session_store[class_name]
 
     def _create_instance(
         self,

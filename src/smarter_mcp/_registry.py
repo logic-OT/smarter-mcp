@@ -9,7 +9,7 @@ from .extractor.models import ExtractedCallable, ExtractionResult
 
 @dataclass
 class RegisteredTool:
-    """A tool registered with Faster-MCP."""
+    """A tool registered with Smarter-MCP."""
     name: str
     description: str | None
     fn: Callable
@@ -23,7 +23,7 @@ class RegisteredTool:
 
 @dataclass
 class RegisteredResource:
-    """A resource registered with Faster-MCP."""
+    """A resource registered with Smarter-MCP."""
     uri: str
     description: str | None
     fn: Callable
@@ -34,7 +34,7 @@ class RegisteredResource:
 
 @dataclass
 class RegisteredToolkit:
-    """A toolkit class registered with Faster-MCP."""
+    """A toolkit class registered with Smarter-MCP."""
     cls: type
     class_name: str
     namespace: str
@@ -145,30 +145,37 @@ class ToolRegistry:
                 if not fn:
                     continue
                 
-                if obj.kind == "property":
-                    uri = f"resource://{ns}/{obj.class_name}/{obj.simple_name}"
+                is_resource = getattr(fn, "_smarter_mcp_resource", False)
+                if obj.kind == "property" or is_resource:
+                    uri = getattr(fn, "_smarter_mcp_uri", None) or f"resource://{ns}/{obj.class_name}/{obj.simple_name}"
+                    description = getattr(fn, "_smarter_mcp_description", None) or obj.docstring
+                    
                     res = RegisteredResource(
                         uri=uri,
-                        description=obj.docstring,
+                        description=description,
                         fn=fn,
                         namespace=ns,
-                        source="discovery",
+                        source="decorator" if is_resource else "discovery",
                         extracted_obj=obj
                     )
                     if ns not in self._resources:
                         self._resources[ns] = {}
                     self._resources[ns][uri] = res
                 else:
-                    tool_name = obj.tool_name
+                    is_tool_decorator = getattr(fn, "_smarter_mcp_tool", False)
+                    tool_name = getattr(fn, "_smarter_mcp_name", None) or obj.tool_name
+                    description = getattr(fn, "_smarter_mcp_description", None) or obj.docstring
+                    tests = getattr(fn, "_smarter_mcp_tests", [])
                         
                     tool = RegisteredTool(
                         name=tool_name,
-                        description=obj.docstring,
+                        description=description,
                         fn=fn,
                         namespace=ns,
-                        source="discovery",
+                        source="decorator" if is_tool_decorator else "discovery",
                         class_name=obj.class_name,
                         is_async=obj.is_async,
+                        tests=tests,
                         extracted_obj=obj
                     )
                     if ns not in self._tools:
@@ -218,3 +225,21 @@ class ToolRegistry:
         for ns_tools in self._tools.values():
             tools.extend(ns_tools.values())
         return tools
+
+    def index_by_name(self) -> dict[str, RegisteredTool]:
+        """Build a lookup mapping tool names → tool for O(1) override matching.
+
+        Each tool is indexed under both its registered name and its extracted
+        qualified name (when available), so a manifest override targeting either
+        form resolves in one dict lookup instead of an O(N) scan.
+
+        Note: if two tools share a simple name across namespaces, the later one
+        wins for that key — qualified names disambiguate. Matches the previous
+        first-hit-wins loop behavior closely enough for override resolution.
+        """
+        index: dict[str, RegisteredTool] = {}
+        for tool in self.get_all_tools():
+            index.setdefault(tool.name, tool)
+            if tool.extracted_obj is not None:
+                index.setdefault(tool.extracted_obj.qualified_name, tool)
+        return index

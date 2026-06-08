@@ -397,64 +397,6 @@ wheels = [
 ]
 
 [[package]]
-name = "faster-mcp"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "click" },
-    { name = "fastmcp" },
-    { name = "jinja2" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
-    { name = "structlog" },
-]
-
-[package.optional-dependencies]
-all = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "openai" },
-    { name = "pillow" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-    { name = "watchfiles" },
-]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-    { name = "watchfiles" },
-]
-llm = [
-    { name = "openai" },
-]
-multimodal = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pillow" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.0" },
-    { name = "faster-mcp", extras = ["llm", "multimodal", "dev"], marker = "extra == 'all'" },
-    { name = "fastmcp", specifier = ">=3.0" },
-    { name = "jinja2", specifier = ">=3.0" },
-    { name = "numpy", marker = "extra == 'multimodal'", specifier = ">=1.24" },
-    { name = "openai", marker = "extra == 'llm'", specifier = ">=1.0" },
-    { name = "pillow", marker = "extra == 'multimodal'", specifier = ">=10.0" },
-    { name = "pydantic", specifier = ">=2.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
-    { name = "structlog", specifier = ">=23.0" },
-    { name = "watchfiles", marker = "extra == 'dev'", specifier = ">=0.20" },
-]
-provides-extras = ["llm", "multimodal", "dev", "all"]
-
-[[package]]
 name = "fastmcp"
 version = "3.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1868,6 +1810,61 @@ sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/46/f5af3402b579fd5e11573ce652019a67074317e18c1935cc0b4ba9b35552/secretstorage-3.5.0-py3-none-any.whl", hash = "sha256:0ce65888c0725fcb2c5bc0fdb8e5438eece02c523557ea40ce0703c266248137", size = 15554, upload-time = "2025-11-23T19:02:51.545Z" },
 ]
+
+[[package]]
+name = "smarter-mcp"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "click" },
+    { name = "fastmcp" },
+    { name = "jinja2" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "structlog" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pillow" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+    { name = "watchfiles" },
+]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+    { name = "watchfiles" },
+]
+multimodal = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pillow" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.0" },
+    { name = "fastmcp", specifier = ">=3.0" },
+    { name = "jinja2", specifier = ">=3.0" },
+    { name = "numpy", marker = "extra == 'multimodal'", specifier = ">=1.24" },
+    { name = "openai", specifier = ">=1.0" },
+    { name = "pillow", marker = "extra == 'multimodal'", specifier = ">=10.0" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
+    { name = "smarter-mcp", extras = ["multimodal", "dev"], marker = "extra == 'all'" },
+    { name = "structlog", specifier = ">=23.0" },
+    { name = "watchfiles", marker = "extra == 'dev'", specifier = ">=0.20" },
+]
+provides-extras = ["multimodal", "dev", "all"]
 
 [[package]]
 name = "sniffio"

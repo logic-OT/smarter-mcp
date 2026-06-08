@@ -6,15 +6,15 @@ import textwrap
 
 import pytest
 
-from faster_mcp.extractor.filters import (
+from smarter_mcp.extractor.filters import (
     ExposureRules,
     FilterResult,
     UnannotatedPolicy,
     VariadicPolicy,
     apply_filters,
 )
-from faster_mcp.extractor.surface import SurfaceExtractor
-from faster_mcp.extractor.models import ExtractionResult
+from smarter_mcp.extractor.surface import SurfaceExtractor
+from smarter_mcp.extractor.models import ExtractionResult
 
 
 class TestFilters:

@@ -9,29 +9,29 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from faster_mcp import __version__
-from faster_mcp.server.router import NamespaceRouter
+from smarter_mcp import __version__
+from smarter_mcp._registry import ToolRegistry
+from smarter_mcp.server.router import NamespaceRouter
 
 
 class HealthEndpoint:
     """Manages the health check endpoint."""
 
-    def __init__(self, router: NamespaceRouter):
+    def __init__(self, router: NamespaceRouter, registry: ToolRegistry):
         self.router = router
+        self.registry = registry
         self.start_time = time.time()
 
     def get_health(self) -> dict[str, Any]:
         """Generate health status report."""
         uptime = int(time.time() - self.start_time)
-        
+
         namespaces = self.router.namespaces
-        tool_count = 0
-        resource_count = 0
-        
-        if self.router.root_server:
-            # Note: We count the actual registered tools in the FastMCP instance
-            tool_count = len(self.router.root_server._tools)
-            resource_count = len(self.router.root_server._resources)
+        tool_count = len(self.registry.get_all_tools())
+        resource_count = sum(
+            len(self.registry.get_namespace_resources(ns))
+            for ns in self.registry.get_all_namespaces()
+        )
 
         return {
             "status": "healthy",

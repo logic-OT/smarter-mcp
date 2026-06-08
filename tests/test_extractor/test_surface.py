@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from faster_mcp.extractor.models import CallableKind, ParamKind
-from faster_mcp.extractor.surface import SurfaceExtractor
+from smarter_mcp.extractor.models import CallableKind, ParamKind
+from smarter_mcp.extractor.surface import SurfaceExtractor
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 

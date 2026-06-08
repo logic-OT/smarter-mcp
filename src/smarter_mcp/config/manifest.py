@@ -65,12 +65,12 @@ class ServerConfig(BaseModel):
     # Auth
     auth_enabled: bool = False
     auth_header: str = "X-API-Key"
-    auth_keys_env: str = "FASTER_MCP_API_KEYS"  # Comma-separated env var
+    auth_keys_env: str = "SMARTER_MCP_API_KEYS"  # Comma-separated env var
 
     # Rate limiting
     rate_limit_enabled: bool = False
     rate_limit_per_minute: int = 60
-    rate_limit_burst: int = 10
+    rate_limit_global_per_minute: int = 1000  # spec's "global: 1000/minute"
 
 
 class SourceConfig(BaseModel):
@@ -193,15 +193,34 @@ class LLMConfig(BaseModel):
     """Enable LLM description generation."""
 
     provider: str = "openrouter"
-    """LLM provider (currently only 'openrouter')."""
+    """LLM provider: 'openai', 'openrouter', or 'anthropic'/'claude'.
+
+    All providers use the OpenAI SDK. 'openrouter' sets
+    base_url to https://openrouter.ai/api/v1 automatically; 'anthropic'/'claude'
+    uses Anthropic's OpenAI-compatible endpoint. Set a custom base_url to reach
+    any other OpenAI-compatible API.
+    """
 
     model: str = "google/gemini-2.0-flash-001"
     """Model to use for description generation."""
 
-    api_key_env: str = "OPENROUTER_API_KEY"
-    """Environment variable containing the API key."""
+    api_key_env: str | None = None
+    """Environment variable containing the API key.
 
-    cache_path: str = ".faster-mcp/description-cache.json"
+    If None, a sensible default is chosen per-provider (OPENROUTER_API_KEY,
+    OPENAI_API_KEY, ANTHROPIC_API_KEY).
+    """
+
+    base_url: str | None = None
+    """Override the API base URL. If None, a per-provider default is used."""
+
+    max_tokens: int = 256
+    """Maximum tokens to generate per description."""
+
+    temperature: float = 0.2
+    """Sampling temperature for description generation."""
+
+    cache_path: str = ".smarter-mcp/description-cache.json"
     """Path for caching generated descriptions."""
 
     overwrite_existing: bool = False
@@ -211,7 +230,7 @@ class LLMConfig(BaseModel):
 class ManifestConfig(BaseModel):
     """Top-level manifest configuration.
 
-    This is the Pydantic model for the faster-mcp.yaml file.
+    This is the Pydantic model for the smarter-mcp.yaml file.
     All fields have sensible defaults — the tool works with
     zero configuration.
     """
@@ -235,6 +254,21 @@ class ManifestConfig(BaseModel):
         """Substitute ${VAR} patterns in all string values."""
         if isinstance(data, dict):
             return _substitute_env_vars(data)
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_null_lists(cls, data: Any) -> Any:
+        """Coerce None to [] for list fields.
+
+        YAML parses a bare key with no value (e.g. ``tools:``) as ``None``.
+        Pydantic rejects ``None`` for ``list`` fields, so we normalise here
+        before validation runs.
+        """
+        if isinstance(data, dict):
+            for field in ("sources", "instances", "tools"):
+                if data.get(field) is None:
+                    data[field] = []
         return data
 
 
@@ -286,7 +320,7 @@ def default_manifest(source_path: str = ".") -> ManifestConfig:
 def find_manifest(search_dir: str | Path = ".") -> Path | None:
     """Search for a manifest file in the given directory and parents.
 
-    Looks for: faster-mcp.yaml, faster-mcp.yml, .faster-mcp.yaml
+    Looks for: smarter-mcp.yaml, smarter-mcp.yml, .smarter-mcp.yaml
 
     Args:
         search_dir: Directory to start searching from.
@@ -294,7 +328,7 @@ def find_manifest(search_dir: str | Path = ".") -> Path | None:
     Returns:
         Path to found manifest, or None.
     """
-    candidates = ["faster-mcp.yaml", "faster-mcp.yml", ".faster-mcp.yaml"]
+    candidates = ["smarter-mcp.yaml", "smarter-mcp.yml", ".smarter-mcp.yaml"]
     search_dir = Path(search_dir).resolve()
 
     current = search_dir

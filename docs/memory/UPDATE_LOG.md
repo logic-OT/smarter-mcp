@@ -1,5 +1,8 @@
 # Update Log — smarter-mcp
 
+## Friday, 12-06-2026, 6:51 pm, [wt/docs] smarter-mcp-spec.md: 5 documentation defects corrected
+smarter-mcp-spec.md: (1) `inherit_methods: true/false` → `include_inherited: true/false` (actual `ExposeConfig` field); (2) nested `server.rate_limit:` YAML block replaced with flat fields `rate_limit_enabled`, `rate_limit_per_minute`, `rate_limit_global_per_minute`; (3) nested `server.auth:` YAML block replaced with flat fields `auth_enabled`, `auth_header`, `auth_keys_env`; (4) removed stale `structlog>=23.0` and `jinja2>=3.0` core-dep rows (not in pyproject, not imported), total corrected to ~5.5MB; (5) stale "cleaned up on session end" wording updated to bounded LRU (max 256, OrderedDict, best-effort `close()`/`__exit__` on eviction) matching `runtime/instances.py` and line ~77 phrasing. Added historical-design-spec note at top of file.
+
 ## Friday, 12-06-2026, 6:20 pm, [wt/docs] Documentation accuracy + LICENSE
 README.md: removed hotlinked user-attachments banner (replaced with plain heading); deduped 3× "Schema validation" bullet → 1, restored missing "Type coercion" prefix; updated session-cleanup claim to bounded LRU wording; fixed LLM YAML (`cache: true` → `enabled: true` + `cache_path:`); fixed expose YAML (`private:` → `include_private:`, `unannotated:` → `unannotated_policy:`). docs/architecture.md: rebuilt scrambled CLI section; fixed Mermaid diagram (removed dead `base path` from routing, `cache`→`cache_path`/`overwrite`→`overwrite_existing` in LLM node). docs/README.md: fixed stale `pymcp` install path → `smarter-mcp`. smarter-mcp-spec.md: updated "Cleanup on session end" to bounded LRU wording. LICENSE: added standard MIT text (Copyright 2026 logic-OT).
 

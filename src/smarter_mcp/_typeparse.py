@@ -17,9 +17,11 @@ is_multimodal_type(s)
     True if *s* names an image / ndarray parameter type.
 
 union_members(s)
-    Return the non-None member type strings for Optional/Union/PEP-604 type
-    strings, or None if *s* is not a union type.  The H9 fix lives here:
-    ``list[int | None]`` returns None (not a union at the top level).
+    Return ALL member type strings (including None/NoneType) if *type_str* is
+    Optional/Union/PEP-604, or ``None`` if *s* is not a union type at the top
+    level.  Callers are responsible for filtering out None/NoneType members.
+    The H9 fix lives here: ``list[int | None]`` returns None (not a union at
+    the top level).
 
 type_str_to_json_schema(s)
     Full Python annotation string → JSON Schema dict (``{"type": ...}``,
@@ -38,12 +40,20 @@ from typing import Any
 def split_top_level(s: str, sep: str) -> list[str]:
     """Split *s* on *sep*, ignoring separators nested inside ``[]`` or ``()``.
 
+    *sep* must be exactly one character.  Multi-character separators are
+    rejected with ``ValueError`` because the ``ch == sep`` loop would silently
+    no-op for ``len(sep) > 1``.
+
     Examples::
 
         split_top_level("int, str", ",")         -> ["int", "str"]
         split_top_level("list[int | None]", "|") -> ["list[int | None]"]
         split_top_level("int | None", "|")       -> ["int", "None"]
     """
+    if len(sep) != 1:
+        raise ValueError(
+            f"split_top_level: sep must be a single character, got {sep!r}"
+        )
     parts: list[str] = []
     depth = 0
     cur: list[str] = []
@@ -88,17 +98,23 @@ _NONE_NAMES = frozenset({"None", "NoneType"})
 
 
 def union_members(type_str: str) -> list[str] | None:
-    """Return non-None member type strings if *type_str* is Optional/Union/PEP-604.
+    """Return all member type strings if *type_str* is Optional/Union/PEP-604.
 
     Returns ``None`` for non-union types so callers fall through to scalar
-    handling.  ``typing.`` prefixes are stripped before matching.
+    handling.  A leading ``typing.`` / ``typing_extensions.`` prefix is
+    stripped before matching (consistent with ``type_str_to_json_schema``).
+    Callers are responsible for filtering out ``None``/``NoneType`` members.
 
     H9 fix: PEP-604 detection first checks whether the top-level ``|`` split
     yields more than one part — ``list[int | None]`` has its ``|`` nested
     inside brackets, so it splits to one part and this function returns None
     (avoiding infinite recursion).
     """
-    s = type_str.replace("typing.", "").strip()
+    s = type_str.strip()
+    for prefix in ("typing_extensions.", "typing."):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            break
 
     if s.startswith("Optional[") and s.endswith("]"):
         inner = s[len("Optional["):-1]
@@ -163,25 +179,6 @@ def _literal_values(inner: str) -> list[Any]:
             # Fall back to a plain string for unrecognised forms.
             values.append(part.strip("'\""))
     return values
-
-
-def _json_type_from_python_values(values: list[Any]) -> str | None:
-    """Infer a single JSON type from a homogeneous list of Python literal values."""
-    if not values:
-        return None
-    json_types: set[str] = set()
-    for v in values:
-        if isinstance(v, bool):
-            json_types.add("boolean")
-        elif isinstance(v, int):
-            json_types.add("integer")
-        elif isinstance(v, float):
-            json_types.add("number")
-        elif isinstance(v, str):
-            json_types.add("string")
-        else:
-            return None
-    return json_types.pop() if len(json_types) == 1 else None
 
 
 def type_str_to_json_schema(type_str: str) -> dict[str, Any]:

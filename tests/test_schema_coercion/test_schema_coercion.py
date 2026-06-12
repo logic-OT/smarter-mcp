@@ -347,3 +347,163 @@ def test_m3_literal_default_still_works():
         f"Literal default 42 must still appear in schema; got {props['x']!r}"
     )
     assert props["x"]["type"] == "integer"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fix 1 — _coerce_int non-finite float guard (OverflowError escape)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_int_coercion_inf_raises():
+    """float('inf') to int must raise CoercionError, not OverflowError."""
+    with pytest.raises(CoercionError, match="non-finite"):
+        _coerce_value_from_str(float("inf"), "int", "n")
+
+
+def test_int_coercion_neg_inf_raises():
+    """float('-inf') to int must raise CoercionError, not OverflowError."""
+    with pytest.raises(CoercionError, match="non-finite"):
+        _coerce_value_from_str(float("-inf"), "int", "n")
+
+
+def test_int_coercion_nan_raises():
+    """float('nan') to int must raise CoercionError."""
+    with pytest.raises(CoercionError, match="non-finite"):
+        _coerce_value_from_str(float("nan"), "int", "n")
+
+
+def test_int_coercion_inf_string_raises():
+    """String 'inf' (parses to float inf) must raise CoercionError."""
+    with pytest.raises(CoercionError, match="non-finite"):
+        _coerce_value_from_str("inf", "int", "n")
+
+
+def test_int_coercion_nan_string_raises():
+    """String 'nan' (parses to float nan) must raise CoercionError."""
+    with pytest.raises(CoercionError, match="non-finite"):
+        _coerce_value_from_str("nan", "int", "n")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fix 6 — Element-wise coercion for list[T] / dict[K,V]
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_list_int_element_coercion():
+    """list[int] from '[\"1\",\"2\"]' (string elements) must return [1, 2]."""
+    result = _coerce_value_from_str('["1","2"]', "list[int]", "items")
+    assert result == [1, 2], f"Expected [1, 2], got {result!r}"
+
+
+def test_dict_str_int_value_coercion():
+    """dict[str, int] from '{\"a\":\"1\"}' must coerce values to int."""
+    result = _coerce_value_from_str('{"a":"1"}', "dict[str, int]", "mapping")
+    assert result == {"a": 1}, f"Expected {{\"a\": 1}}, got {result!r}"
+
+
+def test_list_int_none_element_coercion():
+    """list[int | None] from '[1, null]' must return [1, None]."""
+    result = _coerce_value_from_str("[1, null]", "list[int | None]", "items")
+    assert result == [1, None], f"Expected [1, None], got {result!r}"
+
+
+def test_list_no_type_arg_passthrough():
+    """Bare list (no type arg) must pass json.loads result through unchanged."""
+    result = _coerce_value_from_str('["a", 1]', "list", "items")
+    assert result == ["a", 1]
+
+
+def test_dict_no_type_arg_passthrough():
+    """Bare dict (no type arg) must pass json.loads result through unchanged."""
+    result = _coerce_value_from_str('{"x": "y"}', "dict", "mapping")
+    assert result == {"x": "y"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fix 7 — coerce_arguments via inspect.signature fallback (no extracted_obj)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_coerce_arguments_inspect_fallback():
+    """coerce_arguments must coerce through inspect.signature when extracted_obj is None."""
+    from smarter_mcp._registry import RegisteredTool
+    from smarter_mcp.runtime.coercion import coerce_arguments
+
+    def sample_fn(count: int, label: str, enabled: bool) -> str:
+        return f"{count}-{label}-{enabled}"
+
+    tool = RegisteredTool(
+        name="sample_fn",
+        description=None,
+        fn=sample_fn,
+        namespace="test",
+        source="decorator",
+        extracted_obj=None,  # forces inspect.signature fallback
+    )
+
+    result = coerce_arguments(tool, {"count": "7", "label": "hello", "enabled": "true"})
+    assert result["count"] == 7, f"Expected int 7, got {result['count']!r}"
+    assert result["label"] == "hello", f"Expected 'hello', got {result['label']!r}"
+    assert result["enabled"] is True, f"Expected True, got {result['enabled']!r}"
+
+
+def test_coerce_arguments_inspect_passthrough_unknown():
+    """Extra kwargs with no annotation must pass through unchanged."""
+    from smarter_mcp._registry import RegisteredTool
+    from smarter_mcp.runtime.coercion import coerce_arguments
+
+    def fn(x: int) -> int:
+        return x
+
+    tool = RegisteredTool(
+        name="fn",
+        description=None,
+        fn=fn,
+        namespace="test",
+        source="decorator",
+        extracted_obj=None,
+    )
+
+    result = coerce_arguments(tool, {"x": "3", "extra": "untouched"})
+    assert result["x"] == 3
+    assert result["extra"] == "untouched"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fix 11 — Schema tests: Sequence[float], Set[str], Tuple[int, str]
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_sequence_float_schema():
+    """Sequence[float] must produce type 'array' with items: {type: number}."""
+    from smarter_mcp._typeparse import type_str_to_json_schema
+
+    schema = type_str_to_json_schema("Sequence[float]")
+    assert schema == {"type": "array", "items": {"type": "number"}}, (
+        f"Sequence[float] → expected array/number items, got {schema!r}"
+    )
+
+
+def test_set_str_schema():
+    """Set[str] must produce type 'array' with items: {type: string}."""
+    from smarter_mcp._typeparse import type_str_to_json_schema
+
+    schema = type_str_to_json_schema("Set[str]")
+    assert schema == {"type": "array", "items": {"type": "string"}}, (
+        f"Set[str] → expected array/string items, got {schema!r}"
+    )
+
+
+def test_tuple_int_str_schema_uses_first_arg():
+    """Tuple[int, str] documents current behavior: items uses the first type arg.
+
+    Heterogeneous tuples use the first arg as the items type (intentional).
+    This test pins the behavior so any future change is explicit.
+    """
+    from smarter_mcp._typeparse import type_str_to_json_schema
+
+    schema = type_str_to_json_schema("Tuple[int, str]")
+    # Heterogeneous tuples: items schema derived from first arg (int → integer).
+    assert schema == {"type": "array", "items": {"type": "integer"}}, (
+        f"Tuple[int, str] → expected items={{type:integer}} (first arg), got {schema!r}"
+    )

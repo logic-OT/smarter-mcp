@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from smarter_mcp._registry import RegisteredTool
 from smarter_mcp._typeparse import is_multimodal_type, type_str_to_json_schema
-from smarter_mcp.extractor.models import NON_LITERAL, _NON_LITERAL_TYPE
+from smarter_mcp.extractor.models import _NON_LITERAL_TYPE
 
 
 def build_json_schema(tool: RegisteredTool) -> dict[str, Any]:
@@ -64,9 +64,10 @@ def _schema_from_extracted(tool: RegisteredTool) -> dict[str, Any]:
         if param.description:
             prop["description"] = param.description
 
-        # Multimodal parameters: add a description hint for clients
+        # Multimodal parameters: add a description hint for clients.
+        # type_str_to_json_schema already returns {"type": "string"} for
+        # multimodal types, so no type override is needed here.
         if multimodal:
-            prop["type"] = "string"
             hint = "File path or remote URL to the image"
             existing_desc = prop.get("description", "")
             if existing_desc:
@@ -133,8 +134,9 @@ def _schema_from_signature(fn: Callable) -> dict[str, Any]:
         else:
             prop["type"] = "string"
 
+        # type_str_to_json_schema already returns {"type": "string"} for
+        # multimodal types, so no type override is needed here.
         if multimodal:
-            prop["type"] = "string"
             hint = "File path or remote URL to the image"
             existing_desc = prop.get("description", "")
             if existing_desc:

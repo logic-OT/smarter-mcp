@@ -1,5 +1,8 @@
 from typing import Any, Callable
 
+# Valid lifecycle values for @toolkit — mirrors the Literal in manifest.InstanceConfig.
+_VALID_LIFECYCLES: frozenset[str] = frozenset({"session", "singleton", "per-call"})
+
 # Global registries
 _GLOBAL_TOOLS: list[Callable] = []
 _GLOBAL_RESOURCES: list[Callable] = []
@@ -117,6 +120,14 @@ def toolkit(
         @toolkit("namespace")
         @toolkit(namespace="my_namespace")
     """
+    # M14: validate lifecycle at decoration time so typos are caught immediately,
+    # not silently accepted and discovered only at first tool call.
+    if lifecycle not in _VALID_LIFECYCLES:
+        raise ValueError(
+            f"Invalid lifecycle {lifecycle!r}. "
+            f"Must be one of: {sorted(_VALID_LIFECYCLES)}"
+        )
+
     resolved_namespace = namespace
     cls_to_decorate = None
 

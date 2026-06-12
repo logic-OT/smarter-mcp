@@ -86,8 +86,9 @@ def coerce_arguments(
             coerced[param.name] = _coerce_value_from_str(raw_val, param.effective_type, param.name)
     else:
         sig = inspect.signature(tool.fn)
+        _variadic = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
         for name, param in sig.parameters.items():
-            if name in ("self", "cls") or param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            if name in ("self", "cls") or param.kind in _variadic:
                 continue
             if name not in kwargs:
                 continue

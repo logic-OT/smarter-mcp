@@ -15,7 +15,6 @@ import click
 from smarter_mcp.cli._detect import resolve_target
 from smarter_mcp.server.app import SmarterMCP
 
-
 BANNER = r"""
 ┌─┐ ┌┬┐ ┌─┐ ┬─┐ ┌┬┐ ┌─┐ ┬─┐
 └─┐ │││ ├─┤ ├┬┘  │  ├┤  ├┬┘ - MCP
@@ -106,7 +105,7 @@ def serve(
                     app.config.server.host = host
                 if transport is not None:
                     app.config.server.transport = transport
-                
+
                 # Print banner
                 active_transport = app.config.server.transport
                 if active_transport == "stdio":
@@ -127,7 +126,7 @@ def serve(
             app.config.server.host = host
         if transport is not None:
             app.config.server.transport = transport
-        
+
         # Print banner
         active_transport = app.config.server.transport
         if active_transport == "stdio":
@@ -358,7 +357,7 @@ def init(path: str, output: str | None, force: bool):
             from smarter_mcp.extractor.surface import SurfaceExtractor
             extractor = SurfaceExtractor(source_root=source_root)
             from smarter_mcp.extractor.filters import apply_filters
-            from smarter_mcp.server.app import _resolve_implementations, _exposure_rules_from_config
+            from smarter_mcp.server.app import _exposure_rules_from_config, _resolve_implementations
             extraction = extractor.extract_file(scan_path)
             from smarter_mcp.extractor.models import ExtractionResult
             result = ExtractionResult(modules=[extraction])

@@ -20,6 +20,8 @@ from typing import Any, Callable
 
 from fastmcp import FastMCP
 
+from smarter_mcp._registry import ToolRegistry
+from smarter_mcp._testing import TestReport, ToolTestRunner
 from smarter_mcp.config.manifest import (
     ManifestConfig,
     default_manifest,
@@ -33,18 +35,16 @@ from smarter_mcp.extractor.filters import (
     apply_filters,
 )
 from smarter_mcp.extractor.models import (
-    ExtractionResult,
+    CallableKind,
     ExtractedCallable,
     ExtractedModule,
     ExtractedParam,
-    CallableKind,
+    ExtractionResult,
     ParamKind,
 )
-from smarter_mcp.extractor.surface import SurfaceExtractor, _SYS_PATH_LOCK, _INSPECT_PARAM_KIND_MAP
+from smarter_mcp.extractor.surface import _INSPECT_PARAM_KIND_MAP, _SYS_PATH_LOCK, SurfaceExtractor
 from smarter_mcp.runtime.instances import InstanceManager
 from smarter_mcp.server.router import NamespaceRouter
-from smarter_mcp._registry import ToolRegistry
-from smarter_mcp._testing import ToolTestRunner, TestReport
 
 logger = logging.getLogger(__name__)
 
@@ -773,9 +773,9 @@ class SmarterMCP:
         # a prior build() call, and never clear the global (other SmarterMCP
         # instances in the same process may still need it).
         from smarter_mcp._decorators import (
-            get_global_tools,
             get_global_resources,
             get_global_toolkits,
+            get_global_tools,
         )
 
         # 1. Register global toolkits
@@ -928,9 +928,10 @@ class SmarterMCP:
         # Register custom HTTP endpoints (health + schema introspection)
         from starlette.requests import Request
         from starlette.responses import JSONResponse
+
         from smarter_mcp.server.health import HealthEndpoint
         from smarter_mcp.server.schema_endpoint import SchemaEndpoint
-        from smarter_mcp.server.security import load_api_keys, _constant_time_key_check
+        from smarter_mcp.server.security import _constant_time_key_check, load_api_keys
 
         _health_ep = HealthEndpoint(
             self._router,
@@ -1061,6 +1062,7 @@ class SmarterMCP:
             return []
 
         from starlette.middleware import Middleware
+
         from smarter_mcp.server.security import APIKeyMiddleware, load_api_keys
 
         keys = load_api_keys(self._config.server.auth_keys_env)

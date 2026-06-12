@@ -22,7 +22,6 @@ import inspect
 import logging
 import os
 import sys
-import textwrap
 import threading
 from dataclasses import replace
 from pathlib import Path
@@ -32,6 +31,7 @@ from .cache import ExtractionCache, cache_enabled
 from .docstrings import parse_docstring
 from .models import (
     MISSING,
+    NON_LITERAL,
     CallableKind,
     ExtractedCallable,
     ExtractedClass,
@@ -71,6 +71,12 @@ _EXCLUDED_DIR_NAMES = frozenset({
 # whole tree (often a checkout root) is being walked.
 _SCAN_FILE_WARN_THRESHOLD = 500
 
+# Files larger than this are skipped with a WARNING.
+# Pathologically large files can cause slow parses or RecursionError in
+# ast.parse; that error currently lands in the silently-discarded warnings
+# list, so we guard before attempting the read.
+_MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB
+
 
 def _is_pruned_dir(name: str) -> bool:
     """Whether a directory should be skipped during discovery.
@@ -99,12 +105,16 @@ def _annotation_to_str(node: ast.expr | None) -> str | None:
 
 
 def _default_to_value(node: ast.expr) -> Any:
-    """Convert an AST default value node to a Python value, if literal."""
+    """Convert an AST default value node to a Python value, if literal.
+
+    For non-literal expressions (e.g. ``datetime.now()``) the ``NON_LITERAL``
+    sentinel is returned so downstream code can distinguish "has a real default
+    we can represent" from "has a default we cannot safely serialise".
+    """
     try:
         return ast.literal_eval(node)
     except (ValueError, TypeError):
-        # Non-literal default — store as string representation
-        return ast.unparse(node)
+        return NON_LITERAL
 
 
 def _get_decorator_names(decorator_list: list[ast.expr]) -> list[str]:
@@ -327,16 +337,43 @@ def _extract_module_ast(
     functions: list[ExtractedCallable] = []
     classes: list[ExtractedClass] = []
 
-    # Check for __all__
+    # Check for __all__ at MODULE level only (tree.body = top-level statements).
+    # Also handles the annotated form ``__all__: list[str] = [...]`` (AnnAssign)
+    # and warns when __all__ cannot be statically evaluated.
     all_exports = None
-    for node in ast.walk(tree):
+    for node in tree.body:
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == "__all__":
                     try:
                         all_exports = ast.literal_eval(node.value)
                     except (ValueError, TypeError):
-                        pass
+                        logger.warning(
+                            "Module '%s': __all__ is dynamic or unparseable — "
+                            "respect_all filtering disabled for this module.",
+                            module_path,
+                        )
+        elif isinstance(node, ast.AnnAssign):
+            if (
+                isinstance(node.target, ast.Name)
+                and node.target.id == "__all__"
+                and node.value is not None
+            ):
+                try:
+                    all_exports = ast.literal_eval(node.value)
+                except (ValueError, TypeError):
+                    logger.warning(
+                        "Module '%s': __all__ is dynamic or unparseable — "
+                        "respect_all filtering disabled for this module.",
+                        module_path,
+                    )
+        elif isinstance(node, ast.AugAssign):
+            if isinstance(node.target, ast.Name) and node.target.id == "__all__":
+                logger.warning(
+                    "Module '%s': __all__ uses augmented assignment (+=) — "
+                    "respect_all filtering disabled for this module.",
+                    module_path,
+                )
 
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -400,7 +437,7 @@ def _enrich_param_from_inspect(
                 if hasattr(inspect_param.annotation, "__name__")
                 else str(inspect_param.annotation)
             )
-        except Exception:
+        except Exception:  # noqa: S110 — annotation repr is best-effort; skip on failure
             pass
 
     # Prefer inspect default
@@ -447,7 +484,7 @@ def _enrich_callable_from_inspect(
                 if hasattr(sig.return_annotation, "__name__")
                 else str(sig.return_annotation)
             )
-        except Exception:
+        except Exception:  # noqa: S110 — return-type repr is best-effort; skip on failure
             pass
 
     return replace(
@@ -622,6 +659,9 @@ class SurfaceExtractor:
         source_root: Absolute path to the root of the Python source tree.
         use_inspect: Whether to perform the inspect pass (requires importing modules).
         exclude_patterns: Glob patterns for files to skip (e.g., "test_*", "*_test.py").
+        include_patterns: When non-empty, only files matching at least one of these
+            glob patterns are processed.  An empty list (the default) scans all
+            files that are not excluded.
         use_cache: Enable the disk extraction cache (off by default). Also honors
             the SMARTER_MCP_EXTRACTION_CACHE / SMARTER_MCP_NO_CACHE env vars.
         cache_dir: Where to store cache entries (defaults to .smarter-mcp/extraction-cache).
@@ -632,12 +672,14 @@ class SurfaceExtractor:
         source_root: str | Path,
         use_inspect: bool = True,
         exclude_patterns: list[str] | None = None,
+        include_patterns: list[str] | None = None,
         use_cache: bool = False,
         cache_dir: str | Path | None = None,
     ):
         self.source_root = Path(source_root).resolve()
         self.use_inspect = use_inspect
         self.exclude_patterns = exclude_patterns or ["test_*", "*_test.py", "conftest.py"]
+        self.include_patterns: list[str] = include_patterns or []
 
         self._cache: ExtractionCache | None = (
             ExtractionCache(cache_dir) if cache_enabled(use_cache) else None
@@ -706,6 +748,10 @@ class SurfaceExtractor:
                 # User-supplied exclude globs (e.g. test_*, *_test.py).
                 if self._is_excluded(py_file):
                     continue
+                # User-supplied include globs — when non-empty, act as an
+                # allow-list: only files matching at least one pattern are kept.
+                if not self._is_included(py_file):
+                    continue
                 files.append(py_file)
 
         files.sort()
@@ -734,6 +780,16 @@ class SurfaceExtractor:
                 return True
         return False
 
+    def _is_included(self, file_path: Path) -> bool:
+        """When include_patterns is non-empty, return True only if the file matches
+        at least one pattern.  When include_patterns is empty, every file passes."""
+        if not self.include_patterns:
+            return True
+        for pattern in self.include_patterns:
+            if file_path.match(pattern):
+                return True
+        return False
+
     def _file_to_module_name(self, file_path: Path) -> str:
         """Convert a file path to a dotted module name.
 
@@ -755,6 +811,19 @@ class SurfaceExtractor:
 
     def _extract_file(self, file_path: Path) -> ExtractedModule:
         """Extract a single file through both passes (cached by content hash)."""
+        file_size = file_path.stat().st_size
+        if file_size > _MAX_FILE_BYTES:
+            logger.warning(
+                "Skipping %s: file size %d bytes exceeds the %d-byte limit "
+                "(set _MAX_FILE_BYTES to adjust).",
+                file_path,
+                file_size,
+                _MAX_FILE_BYTES,
+            )
+            return ExtractedModule(
+                module_path=str(file_path.relative_to(self.source_root)),
+                module_name=self._file_to_module_name(file_path),
+            )
         source = file_path.read_text(encoding="utf-8")
         relative_path = str(file_path.relative_to(self.source_root))
         module_name = self._file_to_module_name(file_path)

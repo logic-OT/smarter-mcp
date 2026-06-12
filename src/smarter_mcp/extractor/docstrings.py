@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from enum import Enum
 
 from .models import DocstringFormat
 
@@ -120,7 +119,7 @@ def _parse_google_params(lines: list[str], result: ParsedDocstring) -> None:
     """Parse parameter entries from Google-style Args section."""
     # Pattern: "name (type): description" or "name: description"
     # Flexible indent — real docstrings can be indented to any depth
-    param_re = re.compile(r"^\s+(\w+)\s*(?:\(([^)]+)\))?\s*:\s*(.*)$")
+    param_re = re.compile(r"^\s+(\*{0,2}\w+)\s*(?:\(([^)]+)\))?\s*:\s*(.*)$")
     current_param = None
     current_desc_lines: list[str] = []
 
@@ -260,7 +259,7 @@ def _parse_numpy_returns(body: str, result: ParsedDocstring) -> None:
         result.returns = parts[1].strip()
     else:
         result.returns_type = first
-        result.returns = " ".join(l.strip() for l in lines[1:] if l.strip())
+        result.returns = " ".join(ln.strip() for ln in lines[1:] if ln.strip())
 
 
 def _parse_numpy_raises(body: str, result: ParsedDocstring) -> None:
@@ -297,10 +296,10 @@ def _parse_sphinx(docstring: str) -> ParsedDocstring:
             break
         summary_lines.append(line.strip())
 
-    result.summary = " ".join(l for l in summary_lines if l).strip()
+    result.summary = " ".join(ln for ln in summary_lines if ln).strip()
 
     # Parse directives
-    param_re = re.compile(r"^\s*:param\s+(\w+)\s*:\s*(.*)$")
+    param_re = re.compile(r"^\s*:param\s+(?:(\w[\w.\[\], |]*)\s+)?(\w+)\s*:\s*(.*)$")
     type_re = re.compile(r"^\s*:type\s+(\w+)\s*:\s*(.*)$")
     returns_re = re.compile(r"^\s*:returns?\s*:\s*(.*)$")
     rtype_re = re.compile(r"^\s*:rtype\s*:\s*(.*)$")
@@ -309,7 +308,10 @@ def _parse_sphinx(docstring: str) -> ParsedDocstring:
     for line in lines[directive_start:]:
         m = param_re.match(line)
         if m:
-            result.params[m.group(1)] = m.group(2).strip()
+            param_name = m.group(2)
+            result.params[param_name] = m.group(3).strip()
+            if m.group(1):
+                result.param_types[param_name] = m.group(1).strip()
             continue
 
         m = type_re.match(line)

@@ -60,7 +60,7 @@ class DatabaseClient(BaseClient):
         return [{"sql": sql}]
 
     @classmethod
-    def from_url(cls, url: str) -> "DatabaseClient":
+    def from_url(cls, url: str) -> DatabaseClient:
         """Create a client from a connection URL.
 
         Args:

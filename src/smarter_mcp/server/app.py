@@ -5,7 +5,7 @@ This is the primary entry point for programmatic usage:
 
     from smarter_mcp.server.app import SmarterMCP
 
-    server = SmarterMCP(source_root="./mylib")
+    server = SmarterMCP("my-server", source_root="./mylib")
     server.run()  # starts SSE server on :8000
 """
 
@@ -14,12 +14,15 @@ from __future__ import annotations
 import importlib
 import logging
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from fastmcp import FastMCP
 
+from smarter_mcp._registry import ToolRegistry
+from smarter_mcp._testing import TestReport, ToolTestRunner
 from smarter_mcp.config.manifest import (
     ManifestConfig,
     default_manifest,
@@ -32,14 +35,110 @@ from smarter_mcp.extractor.filters import (
     VariadicPolicy,
     apply_filters,
 )
-from smarter_mcp.extractor.models import ExtractionResult, ExtractedModule, ExtractedCallable, CallableKind
-from smarter_mcp.extractor.surface import SurfaceExtractor, _SYS_PATH_LOCK
+from smarter_mcp.extractor.models import (
+    CallableKind,
+    ExtractedCallable,
+    ExtractedModule,
+    ExtractedParam,
+    ExtractionResult,
+    ParamKind,
+)
+from smarter_mcp.extractor.surface import _INSPECT_PARAM_KIND_MAP, _SYS_PATH_LOCK, SurfaceExtractor
 from smarter_mcp.runtime.instances import InstanceManager
 from smarter_mcp.server.router import NamespaceRouter
-from smarter_mcp._registry import ToolRegistry
-from smarter_mcp._testing import ToolTestRunner, TestReport
 
 logger = logging.getLogger(__name__)
+
+# Loopback addresses — binding to anything else without auth is dangerous.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _warn_insecure_bind(server_config: Any) -> None:
+    """H1: emit a loud WARNING when the server is bound to a non-loopback
+    address with authentication disabled.
+
+    This does NOT prevent startup — operators may have valid reasons (e.g.
+    a private LAN with no public exposure) — but the warning is hard to miss.
+    """
+    host = getattr(server_config, "host", "127.0.0.1")
+    auth_enabled = getattr(server_config, "auth_enabled", False)
+    if host not in _LOOPBACK_HOSTS and not auth_enabled:
+        logger.warning(
+            "SECURITY WARNING: Server is binding to %s with auth_enabled=False. "
+            "All tools are accessible to anyone on the network without authentication. "
+            "Set auth_enabled=True and configure %s, or bind to 127.0.0.1.",
+            host,
+            getattr(server_config, "auth_keys_env", "SMARTER_MCP_API_KEYS"),
+        )
+
+
+def _fix_package_module_names(
+    extraction: ExtractionResult,
+    pkg_name: str,
+) -> ExtractionResult:
+    """Rewrite module names in a package extraction to use dotted import paths.
+
+    When ``SurfaceExtractor`` scans from ``package_dir`` (to avoid walking the
+    entire stdlib / project root), the extracted module names are relative to
+    the package directory:
+
+    - ``__init__.py`` → module_name ``"__init__"`` (should be ``"json"``)
+    - ``decoder.py``  → module_name ``"decoder"``   (should be ``"json.decoder"``)
+
+    This function patches both ``module_name`` and all ``qualified_name`` fields
+    so that ``_resolve_implementations`` can call
+    ``importlib.import_module("json.decoder")`` and ``merge_extraction`` can
+    correctly key impls by ``"json.decoder.JSONDecoder.decode"``.
+
+    C4 fix.
+    """
+    fixed_modules = []
+    for mod_item in extraction.modules:
+        old_name = mod_item.module_name
+        if old_name in ("__init__", ""):
+            new_name = pkg_name
+        else:
+            new_name = f"{pkg_name}.{old_name}"
+
+        prefix_old = old_name + "." if old_name else ""
+        prefix_new = new_name + "."
+
+        def _fix_qname(
+            qname: str,
+            _new: str = new_name,
+            _pold: str = prefix_old,
+            _pnew: str = prefix_new,
+        ) -> str:
+            if qname.startswith(_pold):
+                return _pnew + qname[len(_pold):]
+            # Bare name with no prefix (happens when old_name is "")
+            if not _pold:
+                return f"{_new}.{qname}" if qname else _new
+            return qname
+
+        new_functions = [
+            replace(f, qualified_name=_fix_qname(f.qualified_name))
+            for f in mod_item.functions
+        ]
+        new_classes = [
+            replace(
+                c,
+                qualified_name=_fix_qname(c.qualified_name),
+                methods=[
+                    replace(m, qualified_name=_fix_qname(m.qualified_name))
+                    for m in c.methods
+                ],
+            )
+            for c in mod_item.classes
+        ]
+        fixed_modules.append(replace(
+            mod_item,
+            module_name=new_name,
+            functions=new_functions,
+            classes=new_classes,
+        ))
+
+    return replace(extraction, modules=fixed_modules)
 
 
 def _exposure_rules_from_config(config: ManifestConfig) -> ExposureRules:
@@ -75,7 +174,7 @@ def _exposure_rules_from_config(config: ManifestConfig) -> ExposureRules:
 def _resolve_implementations(
     result: ExtractionResult,
     source_root: str,
-) -> dict[str, Callable]:
+) -> tuple[dict[str, Callable], int, int]:
     """Import modules and resolve the actual callable python objects from an extraction result.
 
     This handles dynamic loading of the python modules detected in the source root directory.
@@ -93,10 +192,14 @@ def _resolve_implementations(
         source_root: The file path root directory containing the source code.
 
     Returns:
-        A dictionary mapping qualified callable names (e.g., "pkg.mod.func" or "pkg.mod.Cls.method")
-        to their actual Python callable objects.
+        A 3-tuple of (impls, failed_module_count, skipped_tool_count):
+        - impls: dict mapping qualified callable names to Python callable objects.
+        - failed_module_count: number of modules that failed to import.
+        - skipped_tool_count: total number of tools unavailable due to import failures.
     """
     impls: dict[str, Callable] = {}
+    failed_modules = 0
+    skipped_tools = 0
 
     # Temporarily prepend source_root to sys.path so the modules import, then
     # restore it. sys.path is global, so we snapshot/restore under the shared
@@ -111,7 +214,15 @@ def _resolve_implementations(
                 try:
                     runtime_module = importlib.import_module(module.module_name)
                 except Exception as e:
-                    logger.warning("Cannot import %s: %s", module.module_name, e)
+                    # M6: module import failures are errors, not warnings — the
+                    # entire module's tools are silently dropped otherwise.
+                    logger.error(
+                        "Failed to import module '%s': %s — all tools in this "
+                        "module will be unavailable.",
+                        module.module_name, e,
+                    )
+                    failed_modules += 1
+                    skipped_tools += len(module.all_callables)
                     continue
 
                 # Resolve functions
@@ -139,7 +250,15 @@ def _resolve_implementations(
         finally:
             sys.path = original_path
 
-    return impls
+    # M6: one end-of-pass summary so operators know the aggregate impact of
+    # import failures without having to scan per-module ERROR lines.
+    if failed_modules:
+        logger.error(
+            "%d module(s) failed to import; %d tool(s) skipped.",
+            failed_modules, skipped_tools,
+        )
+
+    return impls, failed_modules, skipped_tools
 
 
 class SmarterMCP:
@@ -158,8 +277,12 @@ class SmarterMCP:
     5. **Security & Performance**: Applies API key middleware authentication and rate limiting.
 
     Examples:
+        Decorator-only (no source discovery):
+            >>> server = SmarterMCP("my-server")
+            >>> server.run()
+
         Default file-based auto-discovery:
-            >>> server = SmarterMCP(source_root="./src/my_app")
+            >>> server = SmarterMCP("my-server", source_root="./src/my_app")
             >>> server.run()  # Starts SSE server on port 8000
 
         Explicit manifest-driven server:
@@ -168,8 +291,8 @@ class SmarterMCP:
 
         Programmatic configuration with custom settings:
             >>> server = SmarterMCP(
+            ...     "Customer Support API",
             ...     source_root="./src/my_app",
-            ...     name="Customer Support API",
             ...     port=3000,
             ...     transport="sse",
             ...     auth_enabled=True,
@@ -180,10 +303,10 @@ class SmarterMCP:
 
     def __init__(
         self,
+        name: str | None = None,
+        *,
         source_root: str | Path | None = None,
         manifest: str | Path | None = None,
-        *,
-        name: str | None = None,
         port: int | None = None,
         host: str | None = None,
         transport: str | None = None,
@@ -209,10 +332,15 @@ class SmarterMCP:
         as keyword arguments override settings specified in the manifest file.
 
         Args:
-            source_root: File path to the Python source code directory. If not specified, and
-                no manifest file is found, the server defaults to decorator-only registration mode.
-            manifest: File path to a YAML configuration manifest file (e.g., `smarter-mcp.yaml`).
-            name: Optional name for the server. Overrides configuration in manifest.
+            name: Server name (the first positional argument, matching FastMCP convention).
+                Overrides the name in the manifest when both are provided.
+                Example: ``SmarterMCP("my-server")``.
+            source_root: Keyword-only. File path to the Python source code directory.
+                Raises ``ValueError`` if the path is given but does not exist.
+                If not specified and no manifest file is found, the server defaults to
+                decorator-only registration mode.
+            manifest: Keyword-only. File path to a YAML configuration manifest file
+                (e.g., ``smarter-mcp.yaml``).
             port: Port to listen on. Overrides configuration in manifest.
             host: Hostname interface to bind to. Overrides configuration in manifest.
             transport: Underlying communication transport ("sse", "streamable-http", or "stdio").
@@ -230,6 +358,16 @@ class SmarterMCP:
             llm_model: Specific LLM model to query for metadata enrichment.
             llm_api_key_env: Environment variable holding the LLM provider's API token.
         """
+        # C3: validate source_root existence before we try to use it so that a
+        # missing directory fails loudly instead of silently yielding zero tools.
+        if source_root is not None:
+            _sr_path = Path(source_root).resolve()
+            if not _sr_path.exists():
+                raise ValueError(
+                    f"source_root does not exist: {_sr_path!r}. "
+                    "Create the directory first or pass a valid path."
+                )
+
         # Load or create manifest
         if manifest:
             self._config = load_manifest(manifest)
@@ -257,11 +395,13 @@ class SmarterMCP:
                 self._config = ManifestConfig()
 
         # Apply overrides — server
-        if name:
+        # C3: name is the first positional parameter (matching FastMCP convention),
+        # so SmarterMCP("my-server") correctly sets the server name.
+        if name is not None:
             self._config.name = name
-        if port:
+        if port is not None:
             self._config.server.port = port
-        if host:
+        if host is not None:
             self._config.server.host = host
         if transport:
             self._config.server.transport = transport
@@ -299,6 +439,9 @@ class SmarterMCP:
 
         self._registry = ToolRegistry()
         self._instance_manager = InstanceManager(self._config.instances)
+        # Accumulates the count of modules that failed to import across all
+        # _resolve_implementations calls; surfaced in the /health endpoint.
+        self._import_failure_count: int = 0
 
         # Track which decorator-registered objects this instance has already
         # consumed, so repeated build() calls don't double-register and the
@@ -306,12 +449,26 @@ class SmarterMCP:
         # SmarterMCP instances in the same process).
         self._registered_decorator_ids: set[int] = set()
 
+        # M4: guard the manifest test-wiring step so a second build() call
+        # does not re-extend tool.tests with duplicate cases.
+        self._tests_wired: bool = False
+
+        # Wire server.log_level: configure the root Python logger level so the
+        # manifest controls verbosity without requiring CLI flags.  An invalid
+        # value (e.g. "verbose" instead of "debug") is silently ignored so a
+        # typo does not prevent the server from starting.
+        _level_name = self._config.server.log_level.upper()
+        _level = getattr(logging, _level_name, None)
+        if isinstance(_level, int):
+            logging.getLogger().setLevel(_level)
+
 
 
     def discover(
         self,
         source_root: str | Path,
         exclude: list[str] | None = None,
+        include: list[str] | None = None,
         use_cache: bool = False,
     ) -> SmarterMCP:
         """Scan the filesystem within a source directory to discover and register tools.
@@ -321,8 +478,11 @@ class SmarterMCP:
 
         Args:
             source_root: Root directory containing the python code/packages to inspect.
+                Raises ``ValueError`` when the path does not exist (C3 fix).
             exclude: Glob patterns or filenames to skip during AST extraction. Defaults to
                 filtering test files like `test_*`, `*_test.py`, and `conftest.py`.
+            include: When non-empty, only files matching at least one of these glob patterns
+                are scanned.  Wired from ``SourceConfig.include`` in manifest sources.
             use_cache: If True, uses the disk cache to skip unchanged source files during AST
                 extraction, speeding up startup times.
 
@@ -330,19 +490,57 @@ class SmarterMCP:
             The SmarterMCP instance itself, allowing chained calls.
         """
         path = Path(source_root).resolve()
+        # C3a: fail loudly on a nonexistent source_root instead of silently
+        # yielding zero tools via os.walk on a missing directory.
+        if not path.exists():
+            raise ValueError(
+                f"source_root does not exist: {path!r}. "
+                "Create the directory first or pass a valid path."
+            )
+
         extractor = SurfaceExtractor(
             source_root=path,
             use_inspect=self._use_inspect,
             exclude_patterns=exclude or ["test_*", "*_test.py", "conftest.py"],
+            include_patterns=include or [],
             use_cache=use_cache,
         )
         extraction = extractor.extract()
-        
-        impls = _resolve_implementations(extraction, str(path))
-        
+
+        # C5 / M8: surface extraction errors and warnings instead of silently
+        # discarding them, and populate the public extraction_result property.
+        failed_modules = len(extraction.errors)
+        for err in extraction.errors:
+            logger.error("Extraction error: %s", err)
+        for warn in extraction.warnings:
+            logger.warning("Extraction warning: %s", warn)
+        if failed_modules:
+            logger.error(
+                "Extraction summary for %s: %d file(s) had errors — their tools "
+                "are unavailable. Fix the errors above and restart.",
+                path, failed_modules,
+            )
+
+        # M8: accumulate results so the public property is always populated.
+        # Use dataclasses.replace to build a fresh object instead of mutating
+        # the previous ExtractionResult's lists in place, which would corrupt
+        # any cached reference held by the extractor.
+        if self._extraction is None:
+            self._extraction = extraction
+        else:
+            self._extraction = replace(
+                self._extraction,
+                modules=self._extraction.modules + extraction.modules,
+                errors=self._extraction.errors + extraction.errors,
+                warnings=self._extraction.warnings + extraction.warnings,
+            )
+
+        impls, import_fails, _skipped = _resolve_implementations(extraction, str(path))
+        self._import_failure_count += import_fails
+
         rules = _exposure_rules_from_config(self._config)
         filtered = apply_filters(extraction, rules)
-        
+
         self._registry.merge_extraction(filtered, impls)
         return self
 
@@ -354,86 +552,215 @@ class SmarterMCP:
         exclude: list[str] | None = None,
         namespace: str | None = None,
     ) -> SmarterMCP:
-        """Discover and register tools from an already-imported python module.
+        """Discover and register tools from an already-imported python module or class.
 
-        Automatically detects whether the module resides on disk (executing AST extraction
-        and filtering) or is a C-extension / standard library module (falling back to inspect-only).
+        Automatically detects:
+        - Regular ``.py`` files: AST + inspect extraction.
+        - Packages (``__init__.py``): walks all submodules via the normal ``extract()``
+          path so dotted module names resolve correctly (C4 fix).
+        - Classes (``inspect.isclass``): inspect-only path with proper ``class_name``
+          binding (C4 fix).
+        - C-extensions / stdlib: inspect-only fallback.
+
+        An explicit ``include=[...]`` list overrides the variadic-skip policy so that
+        functions with ``*args``/``**kwargs`` are registered when the user asks for them
+        by name (C4 fix).
 
         Args:
-            module: The python module object to inspect (e.g., standard libraries or custom packages).
-            include: Optional whitelist filter. Only functions matching names in this list are added.
-            exclude: Optional blacklist filter. Functions matching names in this list are ignored.
-            namespace: Namespace prefix under which the discovered tools will be routed. Defaults
-                to the module's name.
+            module: The python module or class to inspect.
+            include: Optional whitelist. Only callables with these simple names are added.
+                Also bypasses variadic-skip policy for named items.
+            exclude: Optional blacklist. Callables with these simple names are skipped.
+            namespace: Namespace prefix for the discovered tools. Defaults to the
+                module's name.
 
         Returns:
             The SmarterMCP instance itself, allowing chained calls.
         """
-        source_file = getattr(module, '__file__', None)
-        
-        if source_file and source_file.endswith('.py'):
-            # Full AST extraction
-            extractor = SurfaceExtractor(
-                source_root=Path(source_file).parent,
-                use_inspect=self._use_inspect,
-            )
-            extracted_mod = extractor.extract_file(Path(source_file))
-            extracted = ExtractionResult(modules=[extracted_mod], source_root=str(Path(source_file).parent))
-            
-            impls = _resolve_implementations(extracted, str(Path(source_file).parent))
-            
-            # Simple include/exclude filtering — use replace() so the cached
-            # ExtractedModule object is never mutated.
-            if include:
-                mod = extracted.modules[0]
-                extracted.modules[0] = replace(
-                    mod,
-                    functions=[f for f in mod.functions if f.simple_name in include],
-                    classes=[
-                        replace(c, methods=[m for m in c.methods if m.simple_name in include])
-                        for c in mod.classes
-                    ],
+        import inspect as py_inspect
+        from dataclasses import replace as dc_replace
+
+        # ── C4b: class path ─────────────────────────────────────────────────
+        if py_inspect.isclass(module):
+            cls = module
+            class_module_name = getattr(cls, "__module__", "") or ""
+            class_name = cls.__name__
+            extracted_mod = ExtractedModule(module_path="", module_name=class_module_name)
+            impls: dict[str, Any] = {}
+
+            for mname, _obj in py_inspect.getmembers(cls, predicate=py_inspect.isroutine):
+                if include and mname not in include:
+                    continue
+                if exclude and mname in exclude:
+                    continue
+                if mname.startswith("_"):
+                    continue
+
+                # Build parameter metadata from inspect.signature so downstream
+                # schema generation has real type info (not empty list).
+                try:
+                    sig = py_inspect.signature(getattr(cls, mname))
+                    params = []
+                    for pname, p in sig.parameters.items():
+                        if pname in ("self", "cls"):
+                            continue
+                        ann = (
+                            p.annotation.__name__
+                            if hasattr(p.annotation, "__name__")
+                            and p.annotation is not py_inspect.Parameter.empty
+                            else (
+                                str(p.annotation)
+                                if p.annotation is not py_inspect.Parameter.empty
+                                else None
+                            )
+                        )
+                        params.append(ExtractedParam(
+                            name=pname,
+                            annotation=ann,
+                            kind=_INSPECT_PARAM_KIND_MAP.get(p.kind, ParamKind.POSITIONAL_OR_KEYWORD),
+                        ))
+                except (ValueError, TypeError):
+                    params = []
+
+                qualified = f"{class_module_name}.{class_name}.{mname}"
+                meta = ExtractedCallable(
+                    qualified_name=qualified,
+                    kind=CallableKind.METHOD,
+                    module_path="",
+                    class_name=class_name,
+                    parameters=params,
                 )
-            if exclude:
-                mod = extracted.modules[0]
-                extracted.modules[0] = replace(
-                    mod,
-                    functions=[f for f in mod.functions if f.simple_name not in exclude],
-                    classes=[
-                        replace(c, methods=[m for m in c.methods if m.simple_name not in exclude])
-                        for c in mod.classes
-                    ],
+                extracted_mod.functions.append(meta)
+                impls[qualified] = getattr(cls, mname)
+
+            extracted = ExtractionResult(modules=[extracted_mod], source_root="")
+            ns_name = namespace or class_name
+            self._registry.merge_extraction(extracted, impls, namespace_override=ns_name)
+            return self
+
+        source_file = getattr(module, "__file__", None)
+
+        if source_file and source_file.endswith(".py"):
+            # ── C4a: package path (module is a package with __init__.py) ─────
+            if source_file.endswith("__init__.py"):
+                # The module is a package. Scan only the package directory to
+                # avoid walking the entire stdlib or project tree (using the
+                # parent as source_root would scan everything).
+                #
+                # Strategy:
+                #   1. Extract from package_dir (scans only the package).
+                #   2. Module names relative to package_dir are wrong:
+                #      "__init__" instead of "json", "decoder" instead of
+                #      "json.decoder". Fix them with _fix_package_module_names.
+                #   3. Pass parent_dir as sys.path entry so importlib can
+                #      resolve "json", "json.decoder", etc.
+                package_dir = Path(source_file).parent
+                parent_dir = package_dir.parent
+                pkg_name = module.__name__
+
+                extractor = SurfaceExtractor(
+                    source_root=package_dir,
+                    use_inspect=self._use_inspect,
+                    exclude_patterns=["test_*", "*_test.py", "conftest.py"],
                 )
+                extraction = extractor.extract()
+                # Fix module names: "__init__" → "json", "decoder" → "json.decoder"
+                extraction = _fix_package_module_names(extraction, pkg_name)
+                source_root_str = str(parent_dir)
+            else:
+                # ── Regular single-.py file path ─────────────────────────────
+                extractor = SurfaceExtractor(
+                    source_root=Path(source_file).parent,
+                    use_inspect=self._use_inspect,
+                )
+                extracted_mod = extractor.extract_file(Path(source_file))
+                extraction = ExtractionResult(
+                    modules=[extracted_mod],
+                    source_root=str(Path(source_file).parent),
+                )
+                source_root_str = str(Path(source_file).parent)
+
+            impls, import_fails, _skipped = _resolve_implementations(extraction, source_root_str)
+            self._import_failure_count += import_fails
+
+            # Apply include/exclude filters across all modules.
+            if include or exclude:
+                include_set = set(include) if include else None
+                exclude_set = set(exclude) if exclude else set()
+                new_modules = []
+                for mod_item in extraction.modules:
+                    new_mod = dc_replace(
+                        mod_item,
+                        functions=[
+                            f for f in mod_item.functions
+                            if (include_set is None or f.simple_name in include_set)
+                            and f.simple_name not in exclude_set
+                        ],
+                        classes=[
+                            dc_replace(
+                                c,
+                                methods=[
+                                    m for m in c.methods
+                                    if (include_set is None or m.simple_name in include_set)
+                                    and m.simple_name not in exclude_set
+                                ],
+                            )
+                            for c in mod_item.classes
+                        ],
+                    )
+                    if new_mod.tool_count > 0 or new_mod.resource_count > 0:
+                        new_modules.append(new_mod)
+                extraction.modules = new_modules
 
             rules = _exposure_rules_from_config(self._config)
-            filtered = apply_filters(extracted, rules)
-            
-            self._registry.merge_extraction(filtered, impls, namespace_override=namespace or module.__name__.split('.')[-1])
+
+            # C4: let an explicit include=[...] override the variadic-skip policy.
+            # Without this, a function like json.loads (which has **kwargs) gets
+            # filtered out even when the user explicitly asked for it by name.
+            if include:
+                include_set = set(include)
+                extra_includes: set[str] = set()
+                for mod_item in extraction.modules:
+                    for fn in mod_item.functions:
+                        if fn.simple_name in include_set:
+                            extra_includes.add(fn.qualified_name)
+                    for cls_item in mod_item.classes:
+                        for m in cls_item.methods:
+                            if m.simple_name in include_set:
+                                extra_includes.add(m.qualified_name)
+                rules = dc_replace(
+                    rules,
+                    explicit_includes=rules.explicit_includes | extra_includes,
+                )
+
+            filtered = apply_filters(extraction, rules)
+            ns_name = namespace or module.__name__
+            self._registry.merge_extraction(filtered, impls, namespace_override=ns_name)
+
         else:
-            # Fallback to inspect-only for C-extensions/stdlib
-            # For now we create a dummy extraction result
+            # ── Inspect-only fallback for C-extensions / built-ins ──────────
             extracted_mod = ExtractedModule(module_path="", module_name=module.__name__)
             impls = {}
-            import inspect as py_inspect
-            for name, obj in py_inspect.getmembers(module, py_inspect.isroutine):
-                if include and name not in include:
+            for mname, obj in py_inspect.getmembers(module, py_inspect.isroutine):
+                if include and mname not in include:
                     continue
-                if exclude and name in exclude:
+                if exclude and mname in exclude:
                     continue
-                if name.startswith('_'):
+                if mname.startswith("_"):
                     continue
-                
+
                 meta = ExtractedCallable(
-                    qualified_name=f"{module.__name__}.{name}",
+                    qualified_name=f"{module.__name__}.{mname}",
                     kind=CallableKind.FUNCTION,
-                    module_path=""
+                    module_path="",
                 )
                 extracted_mod.functions.append(meta)
                 impls[meta.qualified_name] = obj
-                
+
             extracted = ExtractionResult(modules=[extracted_mod], source_root="")
-            self._registry.merge_extraction(extracted, impls, namespace_override=namespace or module.__name__.split('.')[-1])
-            
+            ns_name = namespace or module.__name__.split(".")[-1]
+            self._registry.merge_extraction(extracted, impls, namespace_override=ns_name)
+
         return self
 
     def build(self) -> FastMCP:
@@ -452,9 +779,9 @@ class SmarterMCP:
         # a prior build() call, and never clear the global (other SmarterMCP
         # instances in the same process may still need it).
         from smarter_mcp._decorators import (
-            get_global_tools,
             get_global_resources,
             get_global_toolkits,
+            get_global_tools,
         )
 
         # 1. Register global toolkits
@@ -473,7 +800,7 @@ class SmarterMCP:
                 lifecycle=lifecycle,
                 args=constructor_args
             )
-            for name, fn in cls.__dict__.items():
+            for _name, fn in cls.__dict__.items():
                 if getattr(fn, "_smarter_mcp_tool", False):
                     self._registry.register_tool(
                         fn,
@@ -532,18 +859,40 @@ class SmarterMCP:
                 except Exception as e:
                     logger.warning("Could not import module %s: %s", source.module, e)
             elif source.path:
-                self.discover(source.path, exclude=source.exclude)
+                # H14: resolve relative paths against the manifest's directory,
+                # not CWD, so `smarter-mcp serve -m /elsewhere/smarter-mcp.yaml`
+                # scans the right tree.
+                src_path = Path(source.path)
+                if not src_path.is_absolute() and self._config.manifest_dir:
+                    src_path = Path(self._config.manifest_dir) / src_path
+                src_path = src_path.resolve()
+
+                if not src_path.exists():
+                    logger.error(
+                        "Source path '%s' (resolved: %s) does not exist — skipping.",
+                        source.path, src_path,
+                    )
+                    continue
+
+                self.discover(
+                    str(src_path),
+                    exclude=source.exclude,
+                    include=source.include if source.include else None,
+                )
 
         # Step 2: Wire manifest test cases into the registry.
         # ToolOverride.tests defined in YAML need to be merged into the
         # corresponding RegisteredTool.tests so the test runner can find them.
         # O(1) per override via a single name→tool index (built once).
-        if self._config.tools:
+        # Guard with _tests_wired so a second build() call does not append
+        # the same cases again (M4 idempotency fix).
+        if self._config.tools and not self._tests_wired:
             tool_index = self._registry.index_by_name()
             for override in self._config.tools:
                 tool = tool_index.get(override.function)
                 if tool is not None and override.tests:
                     tool.tests.extend(override.tests)
+            self._tests_wired = True
 
         # Step 2.5: LLM-assisted description generation (optional).
         # Fills in missing tool descriptions before the server is built so the
@@ -557,14 +906,19 @@ class SmarterMCP:
                 LLMGenerator(self._config.llm).enrich_registry(self._registry)
             except LLMNotAvailableError as e:
                 logger.warning("LLM description generation skipped: %s", e)
-            except Exception as e:  # noqa: BLE001 - never block server build
+            except Exception as e:
                 logger.warning("LLM description generation failed: %s", e)
 
         # Step 3: Build router + server
         from smarter_mcp.server.security import (
+            assert_auth_keys_present,
             build_auth_provider,
             build_rate_limit_middleware,
         )
+
+        # H7 / A2: fail-closed guard — fires regardless of which public
+        # entrypoint (build/http_app/run) is used.
+        assert_auth_keys_present(self._config.server)
 
         self._router = NamespaceRouter(
             config=self._config,
@@ -580,21 +934,63 @@ class SmarterMCP:
         # Register custom HTTP endpoints (health + schema introspection)
         from starlette.requests import Request
         from starlette.responses import JSONResponse
+
         from smarter_mcp.server.health import HealthEndpoint
         from smarter_mcp.server.schema_endpoint import SchemaEndpoint
+        from smarter_mcp.server.security import _constant_time_key_check, load_api_keys
 
-        _health_ep = HealthEndpoint(self._router, self._registry)
-        _schema_ep = SchemaEndpoint(self._registry)
+        _health_ep = HealthEndpoint(
+            self._router,
+            self._registry,
+            extraction_result=self._extraction,
+            import_failure_count=self._import_failure_count,
+        )
+        # A1: SchemaEndpoint gets the ROUTER so it builds from the registered
+        # tool surface (respects expose=False, name overrides, etc.).
+        _schema_ep = SchemaEndpoint(self._registry, router=self._router)
+
+        _auth_enabled = self._config.server.auth_enabled
+        _auth_header = self._config.server.auth_header
+        _auth_keys_env = self._config.server.auth_keys_env
+
+        def _is_authenticated(request: Request) -> bool:
+            """Return True if the request carries a valid API key."""
+            if not _auth_enabled:
+                return False
+            keys = load_api_keys(_auth_keys_env)
+            provided = request.headers.get(_auth_header, "")
+            return bool(provided) and _constant_time_key_check(provided, keys)
 
         @self._server.custom_route("/health", methods=["GET"])
         async def _health_handler(request: Request) -> JSONResponse:
-            return JSONResponse(_health_ep.get_health())
+            # H8: unauthenticated callers get only the bare status; full
+            # detail (namespaces, counts, version) requires a valid API key.
+            return JSONResponse(
+                _health_ep.get_health(authenticated=_is_authenticated(request))
+            )
 
         @self._server.custom_route("/mcp/{namespace}/schema", methods=["GET"])
         async def _schema_handler(request: Request) -> JSONResponse:
+            # I1: gate the tool-surface schema behind authentication when auth
+            # is enabled.  Unauthenticated callers could otherwise enumerate
+            # every registered tool even if the raw server property is mounted
+            # separately (e.g. in a larger ASGI composite).
+            if _auth_enabled and not _is_authenticated(request):
+                return JSONResponse(
+                    {
+                        "error": "unauthorized",
+                        "message": f"Missing or invalid {_auth_header}",
+                    },
+                    status_code=401,
+                )
             ns = request.path_params["namespace"]
             compact = request.query_params.get("compact", "false").lower() == "true"
-            return JSONResponse(_schema_ep.get_namespace_schema(ns, compact=compact))
+            result = _schema_ep.get_namespace_schema(ns, compact=compact)
+            # H8 / A1: if the namespace was not found, return 404 (not 200
+            # with an error key, which agents can't distinguish from success).
+            if "error" in result:
+                return JSONResponse(result, status_code=404)
+            return JSONResponse(result)
 
         logger.info(
             "Server '%s' ready: %d namespaces, %s transport",
@@ -672,28 +1068,49 @@ class SmarterMCP:
         logger.info(report.summary())
 
     def _asgi_middleware(self) -> list:
-        """Construct ASGI middleware to enforce authentication rules.
-
-        Loads allowed API keys from the configured environment variables and builds
-        the starlette APIKeyMiddleware wrapper.
+        """Construct ASGI middleware to enforce authentication and rate-limiting.
 
         Returns:
-            A list containing Starlette Middleware objects if auth is enabled, or an empty list.
+            A list of Starlette ``Middleware`` objects.  ``IPRateLimitMiddleware``
+            is placed first (outermost) so it throttles even unauthenticated
+            floods before they reach the auth layer.  ``APIKeyMiddleware`` is
+            added only when auth is enabled.
+
+        C3: ``IPRateLimitMiddleware`` is now wired in here (gated on
+        ``rate_limit_enabled``) so it actually runs on ``http_app()`` /
+        ``run()`` — previously it was built but never applied to the ASGI stack.
         """
-        if not self._config.server.auth_enabled:
-            return []
-
         from starlette.middleware import Middleware
-        from smarter_mcp.server.security import APIKeyMiddleware, load_api_keys
 
-        keys = load_api_keys(self._config.server.auth_keys_env)
-        return [
-            Middleware(
-                APIKeyMiddleware,
-                header_name=self._config.server.auth_header,
-                valid_keys=keys,
+        from smarter_mcp.server.security import (
+            APIKeyMiddleware,
+            IPRateLimitMiddleware,
+            load_api_keys,
+        )
+
+        result: list = []
+
+        # C3: IP rate limiting — outermost so it fires before auth.
+        if self._config.server.rate_limit_enabled:
+            result.append(
+                Middleware(
+                    IPRateLimitMiddleware,
+                    max_requests=self._config.server.rate_limit_per_minute,
+                    window_seconds=60,
+                )
             )
-        ]
+
+        if self._config.server.auth_enabled:
+            keys = load_api_keys(self._config.server.auth_keys_env)
+            result.append(
+                Middleware(
+                    APIKeyMiddleware,
+                    header_name=self._config.server.auth_header,
+                    valid_keys=keys,
+                )
+            )
+
+        return result
 
     def http_app(self) -> Any:
         """Construct and return the Starlette ASGI application with configured middlewares.
@@ -707,6 +1124,7 @@ class SmarterMCP:
         """
         if self._server is None:
             self.build()
+        _warn_insecure_bind(self._config.server)
         return self._server.http_app(middleware=self._asgi_middleware())
 
     def run(self) -> None:
@@ -727,6 +1145,7 @@ class SmarterMCP:
         if transport == "stdio":
             self._server.run(transport="stdio")
         elif transport == "sse":
+            _warn_insecure_bind(self._config.server)
             self._server.run(
                 transport="sse",
                 host=self._config.server.host,
@@ -734,6 +1153,7 @@ class SmarterMCP:
                 middleware=self._asgi_middleware(),
             )
         elif transport == "streamable-http":
+            _warn_insecure_bind(self._config.server)
             self._server.run(
                 transport="streamable-http",
                 host=self._config.server.host,

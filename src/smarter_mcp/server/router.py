@@ -11,15 +11,17 @@ collision-free tool naming:
 
 from __future__ import annotations
 
-import asyncio
-import inspect
+import importlib
 import logging
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
 
-from smarter_mcp.config.manifest import ManifestConfig, RoutingConfig, ToolOverride
-from smarter_mcp._registry import ToolRegistry, RegisteredTool, RegisteredResource
+from smarter_mcp._registry import RegisteredResource, RegisteredTool, ToolRegistry
+from smarter_mcp.config.manifest import ManifestConfig, ToolOverride
+
+if TYPE_CHECKING:
+    from smarter_mcp.runtime.instances import InstanceManager
 
 logger = logging.getLogger(__name__)
 
@@ -61,29 +63,70 @@ def _build_tool_name(
 
     Functions: use the function name directly.
     Methods: ClassName{separator}method_name to avoid collisions.
+
+    H12: if the user explicitly set the name via ``@tool(name="...")``, that
+    name is used verbatim — the class prefix is NOT stacked on top.
     """
+    # An explicit @tool(name=...) sets _smarter_mcp_name on the function.
+    # Respect that choice: don't prepend the class name.
+    if getattr(tool.fn, "_smarter_mcp_name", None) is not None:
+        return tool.name
     if tool.class_name and not tool.name.startswith(tool.class_name):
         return f"{tool.class_name}{separator}{tool.name}"
     return tool.name
 
 
 def _build_tool_description(tool: RegisteredTool | RegisteredResource) -> str:
-    """Generate a description for the MCP tool or resource."""
-    if tool.description:
-        # Use first line of description/docstring
-        first_line = tool.description.strip().split("\n")[0].strip()
-        if first_line:
-            return first_line
+    """Return the full description for an MCP tool or resource.
 
-    # Auto-generate a basic description
+    Explicit ``@tool("...")`` strings and LLM-generated descriptions may span
+    multiple lines — truncating them to the first line discards meaningful
+    content and wastes LLM-generated text.  Only auto-generated placeholders
+    are necessarily terse.
+    """
+    if tool.description:
+        # Return the full description unchanged — do NOT truncate to the first
+        # line.  Multi-line docstrings and LLM descriptions must survive intact.
+        return tool.description.strip()
+
+    # Auto-generate a minimal placeholder when no description is available.
     if isinstance(tool, RegisteredTool):
         if tool.class_name:
             return f"{tool.class_name}.{tool.name}()"
         return f"{tool.name}()"
     elif isinstance(tool, RegisteredResource):
         return f"Resource: {tool.uri}"
-    
+
     return ""
+
+
+def _make_bound_getter(
+    fn: Any,
+    cls_name: str,
+    cls_obj: type,
+    manager: Any,
+    resource_uri: str,
+    log: Any,
+) -> Any:
+    """Return a zero-parameter callable that resolves an instance and calls *fn*.
+
+    Using a factory function (instead of default-value parameters) means the
+    returned ``_bound_getter`` has **no** visible parameters.  FastMCP inspects
+    the signature to decide whether to treat the callable as a static resource
+    or a resource template; default-value params look like MCP parameters and
+    trigger "URI template must contain at least one parameter".
+    """
+    def _bound_getter() -> Any:
+        ctx = None
+        try:
+            from fastmcp.server.dependencies import get_context
+            ctx = get_context()
+        except (ImportError, LookupError, RuntimeError):
+            log.debug("get_context() unavailable for resource %s", resource_uri)
+        instance = manager.get_instance(cls_name, cls_obj, ctx)
+        return fn(instance)
+
+    return _bound_getter
 
 
 class NamespaceRouter:
@@ -97,7 +140,7 @@ class NamespaceRouter:
     def __init__(
         self,
         config: ManifestConfig,
-        instance_manager: "InstanceManager" | None = None,
+        instance_manager: InstanceManager | None = None,
     ):
         """
         Args:
@@ -138,7 +181,13 @@ class NamespaceRouter:
             sub_server = self._build_namespace_server(ns_name, registry)
             if sub_server:
                 self._namespaces[ns_name] = sub_server
-                self._root.mount(sub_server, namespace=ns_name)
+                # H12: the "default" namespace (used for @tool/@resource
+                # decorator-registered callables) must be mounted WITHOUT a
+                # prefix so a @tool greet is simply "greet", not "default_greet".
+                if ns_name == "default":
+                    self._root.mount(sub_server)  # namespace=None → no prefix
+                else:
+                    self._root.mount(sub_server, namespace=ns_name)
 
         return self._root
 
@@ -193,9 +242,15 @@ class NamespaceRouter:
                 description = override.description
 
         impl = tool.fn
-        
+
         from smarter_mcp.runtime.tool_wrapper import build_tool_wrapper
-        impl = build_tool_wrapper(tool, impl, self.instance_manager)
+        impl = build_tool_wrapper(
+            tool,
+            impl,
+            self.instance_manager,
+            auto_detect=self.config.multimodal.auto_detect,
+            include_traceback=self.config.multimodal.debug_include_traceback,
+        )
 
         # Register with FastMCP
         try:
@@ -215,10 +270,46 @@ class NamespaceRouter:
         resource: RegisteredResource,
         namespace: str,
     ) -> None:
-        """Register a property as an MCP resource."""
-        description = _build_tool_description(resource)
+        """Register a property as an MCP resource.
 
+        H13: property getters are unbound ``fget`` functions that require a
+        ``self`` argument.  FastMCP rejects such callables (it sees an
+        unexpected first positional param).  We wrap them so that ``self`` is
+        resolved via the InstanceManager at call time, exactly as
+        ``_build_method_wrapper`` does for tools.
+        """
+        description = _build_tool_description(resource)
         impl = resource.fn
+
+        # H13: bind property getter when we have class context
+        if (
+            resource.extracted_obj is not None
+            and resource.extracted_obj.class_name is not None
+            and self.instance_manager is not None
+        ):
+            class_name = resource.extracted_obj.class_name
+            # Derive the module from the qualified name: "mod.Cls.prop" -> "mod"
+            qualified = resource.extracted_obj.qualified_name
+            qparts = qualified.rsplit(".", 2)
+            if len(qparts) == 3:
+                module_name = qparts[0]
+            else:
+                module_name = (
+                    resource.extracted_obj.module_path.replace("/", ".").removesuffix(".py")
+                )
+
+            try:
+                mod = importlib.import_module(module_name)
+                cls_obj = getattr(mod, class_name)
+            except Exception as exc:
+                logger.warning(
+                    "Cannot bind property resource %s: could not load %s.%s: %s",
+                    resource.uri, module_name, class_name, exc,
+                )
+            else:
+                impl = _make_bound_getter(
+                    impl, class_name, cls_obj, self.instance_manager, resource.uri, logger
+                )
 
         try:
             server.resource(resource.uri, description=description)(impl)

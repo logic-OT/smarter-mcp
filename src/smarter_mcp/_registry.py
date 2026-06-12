@@ -1,10 +1,24 @@
 from __future__ import annotations
 
 import inspect
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal
+from typing import Any, Literal, Protocol
 
-from .extractor.models import ExtractedCallable, ExtractionResult
+from .extractor.models import ExtractedCallable, ExtractedModule, ExtractionResult
+
+logger = logging.getLogger(__name__)
+
+
+class _HasModules(Protocol):
+    """Structural type for any object that exposes a list of ExtractedModules.
+
+    Both ``ExtractionResult`` and ``FilterResult`` satisfy this protocol,
+    allowing ``merge_extraction`` to accept either without an explicit Union.
+    """
+
+    modules: list[ExtractedModule]
 
 
 @dataclass
@@ -81,7 +95,7 @@ class ToolRegistry:
 
         if namespace not in self._tools:
             self._tools[namespace] = {}
-            
+
         self._tools[namespace][tool_name] = tool
         return tool
 
@@ -104,7 +118,7 @@ class ToolRegistry:
 
         if namespace not in self._resources:
             self._resources[namespace] = {}
-            
+
         self._resources[namespace][uri] = res
         return res
 
@@ -123,33 +137,51 @@ class ToolRegistry:
             lifecycle=lifecycle,
             constructor_args=constructor_args or {}
         )
-        self._toolkits[cls.__name__] = tk
+        _toolkit_key = f"{cls.__module__}.{cls.__qualname__}"
+        existing = self._toolkits.get(_toolkit_key)
+        if existing is not None and existing.cls is not cls:
+            logger.warning(
+                "Toolkit collision: '%s' is already registered. "
+                "The new registration will overwrite it.",
+                _toolkit_key,
+            )
+        self._toolkits[_toolkit_key] = tk
         return tk
 
     def merge_extraction(
         self,
-        extraction: ExtractionResult,
+        extraction: _HasModules,
         implementations: dict[str, Callable],
         namespace_override: str | None = None
     ) -> None:
         """Merge auto-discovered tools/resources into the registry."""
         for mod in extraction.modules:
-            ns = namespace_override or mod.module_name.split(".")[-1] or "default"
+            # H12: use the full dotted module path for the namespace so that
+            # a/utils.py (module "a.utils") and b/utils.py (module "b.utils")
+            # get different namespaces ("a_utils" vs "b_utils") and do not
+            # silently collide on the last segment "utils".
+            if namespace_override:
+                ns = namespace_override
+            elif mod.module_name:
+                ns = "_".join(mod.module_name.split("."))
+            else:
+                ns = "default"
+
             for obj in mod.all_callables:
                 # Resolve the implementation function
                 impl_key = f"{mod.module_name}.{obj.simple_name}"
                 if obj.class_name:
                     impl_key = f"{mod.module_name}.{obj.class_name}.{obj.simple_name}"
-                
+
                 fn = implementations.get(impl_key)
                 if not fn:
                     continue
-                
+
                 is_resource = getattr(fn, "_smarter_mcp_resource", False)
                 if obj.kind == "property" or is_resource:
                     uri = getattr(fn, "_smarter_mcp_uri", None) or f"resource://{ns}/{obj.class_name}/{obj.simple_name}"
                     description = getattr(fn, "_smarter_mcp_description", None) or obj.docstring
-                    
+
                     res = RegisteredResource(
                         uri=uri,
                         description=description,
@@ -166,7 +198,7 @@ class ToolRegistry:
                     tool_name = getattr(fn, "_smarter_mcp_name", None) or obj.tool_name
                     description = getattr(fn, "_smarter_mcp_description", None) or obj.docstring
                     tests = getattr(fn, "_smarter_mcp_tests", [])
-                        
+
                     tool = RegisteredTool(
                         name=tool_name,
                         description=description,
@@ -180,10 +212,22 @@ class ToolRegistry:
                     )
                     if ns not in self._tools:
                         self._tools[ns] = {}
-                        
-                    # Decorator wins over discovery
+
                     existing = self._tools[ns].get(tool_name)
-                    if not existing or existing.source != "decorator":
+                    if existing is None:
+                        self._tools[ns][tool_name] = tool
+                    elif existing.source == "decorator":
+                        # Decorator-registered tools always win silently.
+                        pass
+                    else:
+                        # H12: warn on silent collision so operators know what
+                        # happened instead of getting last-write-wins silently.
+                        logger.warning(
+                            "Tool name collision in namespace '%s': '%s' is being "
+                            "overwritten (previous source=%s, new source=%s). "
+                            "Consider namespace overrides or renaming.",
+                            ns, tool_name, existing.source, tool.source,
+                        )
                         self._tools[ns][tool_name] = tool
 
     def merge_module(
@@ -199,7 +243,7 @@ class ToolRegistry:
                 impl_key = f"{mod.module_name}.{obj.simple_name}"
                 if obj.class_name:
                     impl_key = f"{mod.module_name}.{obj.class_name}.{obj.simple_name}"
-                
+
                 try:
                     if obj.class_name:
                         cls_obj = getattr(module, obj.class_name)
@@ -208,18 +252,18 @@ class ToolRegistry:
                         impls[impl_key] = getattr(module, obj.simple_name)
                 except AttributeError:
                     continue
-        
+
         self.merge_extraction(extraction, impls, namespace_override=namespace_override)
 
     def get_namespace_tools(self, namespace: str) -> list[RegisteredTool]:
         return list(self._tools.get(namespace, {}).values())
-        
+
     def get_namespace_resources(self, namespace: str) -> list[RegisteredResource]:
         return list(self._resources.get(namespace, {}).values())
 
     def get_all_namespaces(self) -> set[str]:
         return set(self._tools.keys()) | set(self._resources.keys())
-        
+
     def get_all_tools(self) -> list[RegisteredTool]:
         tools = []
         for ns_tools in self._tools.values():

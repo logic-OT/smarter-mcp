@@ -9,7 +9,7 @@ from smarter_mcp.llm.generator import LLMGenerator
 
 __all__ = [
     "LLMGenerator",
+    "LLMNotAvailableError",
     "OpenAIClient",
     "build_llm_client",
-    "LLMNotAvailableError",
 ]

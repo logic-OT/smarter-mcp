@@ -11,13 +11,16 @@ The manifest is the control plane. It defines:
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -56,11 +59,14 @@ def _substitute_env_vars(value: Any) -> Any:
 class ServerConfig(BaseModel):
     """Server transport and networking configuration."""
 
-    host: str = "0.0.0.0"
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = "127.0.0.1"
     port: int = 8000
     transport: Literal["sse", "streamable-http", "stdio"] = "sse"
-    cors_origins: list[str] = Field(default_factory=lambda: ["*"])
     log_level: str = "info"
+    """Python logging level applied at server startup (e.g. 'info', 'debug', 'warning').
+    Wired in SmarterMCP.__init__ via logging.getLogger().setLevel()."""
 
     # Auth
     auth_enabled: bool = False
@@ -76,12 +82,14 @@ class ServerConfig(BaseModel):
 class SourceConfig(BaseModel):
     """Configuration for a source directory or module to scan."""
 
+    model_config = ConfigDict(extra="forbid")
+
     path: str | None = None
     """Path relative to manifest file (or absolute)."""
 
     module: str | None = None
     """Importable module name to scan (e.g., 'random')."""
-    
+
     namespace: str | None = None
     """Custom namespace override."""
 
@@ -89,7 +97,8 @@ class SourceConfig(BaseModel):
     """Glob patterns to exclude from scanning."""
 
     include: list[str] = Field(default_factory=list)
-    """If non-empty, only include files matching these patterns."""
+    """If non-empty, only include files matching these glob patterns (path sources)
+    or callable names (module sources)."""
 
     @model_validator(mode="after")
     def check_path_or_module(self) -> SourceConfig:
@@ -101,11 +110,7 @@ class SourceConfig(BaseModel):
 class RoutingConfig(BaseModel):
     """Namespace routing configuration."""
 
-    base_path: str = "/mcp"
-    """Base URL path for MCP endpoints."""
-
-    root_aggregate: bool = True
-    """Whether the root server aggregates all tools from sub-namespaces."""
+    model_config = ConfigDict(extra="forbid")
 
     overrides: dict[str, str] = Field(default_factory=dict)
     """Module path → custom namespace mapping (e.g., 'db/client' → 'database')."""
@@ -116,6 +121,8 @@ class RoutingConfig(BaseModel):
 
 class ExposeConfig(BaseModel):
     """Controls what gets exposed as MCP tools."""
+
+    model_config = ConfigDict(extra="forbid")
 
     include_private: bool = False
     include_dunder: bool = False
@@ -134,6 +141,8 @@ class InstanceConfig(BaseModel):
     2. Factory function: Call a factory function
     3. Default: Try cls() with no arguments
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     class_name: str
     """Fully qualified class name (e.g., 'mylib.db.Client')."""
@@ -154,6 +163,8 @@ class InstanceConfig(BaseModel):
 class ToolOverride(BaseModel):
     """Per-tool customization."""
 
+    model_config = ConfigDict(extra="forbid")
+
     function: str
     """Qualified function/method name (e.g., 'mylib.db.Client.query')."""
 
@@ -166,9 +177,6 @@ class ToolOverride(BaseModel):
     expose: bool = True
     """Set to false to explicitly exclude this tool."""
 
-    param_descriptions: dict[str, str] = Field(default_factory=dict)
-    """Per-parameter description overrides."""
-
     tests: list[dict[str, Any]] = Field(default_factory=list)
     """List of test cases for this tool."""
 
@@ -176,18 +184,44 @@ class ToolOverride(BaseModel):
 class MultimodalConfig(BaseModel):
     """Multimodal content handling configuration."""
 
-    auto_detect: bool = True
-    """Automatically detect PIL.Image, numpy.ndarray returns."""
+    model_config = ConfigDict(extra="forbid")
 
-    image_format: str = "png"
-    """Default format for encoding images."""
+    auto_detect: bool = True
+    """When True, PIL.Image.Image and numpy.ndarray tool return values are
+    automatically encoded as MCP Image objects. Set to False to disable
+    image coercion entirely (tools must return fastmcp.Image explicitly).
+    Consumed by runtime/tool_wrapper.py — gated per-wrapper at build time."""
 
     image_max_size: tuple[int, int] = (1024, 1024)
-    """Maximum image dimensions (will resize if larger)."""
+    """Maximum image dimensions (width, height) in pixels.
+    Consumed by the image-security interceptor (security hardening PR)."""
+
+    allow_url_fetch: bool = False
+    """When True, image parameters accept HTTP/HTTPS URLs and will fetch them.
+    Default False to prevent SSRF attacks — must be explicitly opted in.
+    When enabled, private/loopback/link-local IP ranges are always blocked."""
+
+    allow_local_file: bool = False
+    """When True, image parameters accept local filesystem paths.
+    Default False to prevent arbitrary file disclosure — must be explicitly
+    opted in. Treat as a trust boundary: only enable for trusted callers."""
+
+    url_fetch_timeout: float = 10.0
+    """Timeout in seconds for URL image fetches (when allow_url_fetch=True)."""
+
+    url_max_bytes: int = 10 * 1024 * 1024  # 10 MB
+    """Maximum number of bytes to read from a URL or base64 payload."""
+
+    debug_include_traceback: bool = False
+    """When True, error responses include the full server-side traceback.
+    Default False to avoid leaking file paths/secrets to clients.
+    Enable only in development environments."""
 
 
 class LLMConfig(BaseModel):
     """LLM-assisted description generation configuration."""
+
+    model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
     """Enable LLM description generation."""
@@ -235,9 +269,18 @@ class ManifestConfig(BaseModel):
     zero configuration.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str = "my-mcp-server"
     version: str = "0.1.0"
     description: str = ""
+
+    manifest_dir: str | None = Field(default=None, exclude=True)
+    """Directory containing the manifest file. Set at load time, not from YAML.
+
+    Used to resolve relative source paths against the manifest's own location
+    rather than CWD (H14 fix).
+    """
 
     server: ServerConfig = Field(default_factory=ServerConfig)
     sources: list[SourceConfig] = Field(default_factory=list)
@@ -283,13 +326,14 @@ def load_manifest(path: str | Path) -> ManifestConfig:
         path: Path to the YAML manifest file.
 
     Returns:
-        Validated ManifestConfig.
+        Validated ManifestConfig with ``manifest_dir`` set to the file's
+        parent directory so callers can resolve relative source paths (H14).
 
     Raises:
         FileNotFoundError: If the manifest file doesn't exist.
         ValueError: If the manifest fails validation.
     """
-    path = Path(path)
+    path = Path(path).resolve()
     if not path.exists():
         raise FileNotFoundError(f"Manifest not found: {path}")
 
@@ -297,7 +341,11 @@ def load_manifest(path: str | Path) -> ManifestConfig:
     if raw is None:
         raw = {}
 
-    return ManifestConfig.model_validate(raw)
+    config = ManifestConfig.model_validate(raw)
+    # H14: record the manifest's directory so relative source paths can be
+    # resolved against it rather than CWD.
+    config.manifest_dir = str(path.parent)
+    return config
 
 
 def default_manifest(source_path: str = ".") -> ManifestConfig:
@@ -317,10 +365,17 @@ def default_manifest(source_path: str = ".") -> ManifestConfig:
     )
 
 
+_MANIFEST_BOUNDARY_DIRS = frozenset({".git", ".hg", ".svn"})
+
+
 def find_manifest(search_dir: str | Path = ".") -> Path | None:
     """Search for a manifest file in the given directory and parents.
 
     Looks for: smarter-mcp.yaml, smarter-mcp.yml, .smarter-mcp.yaml
+
+    The upward walk stops at a VCS project boundary (.git / .hg / .svn) so a
+    stray manifest in a parent project cannot silently hijack configuration
+    (C3 fix).  Logs at INFO which manifest was adopted.
 
     Args:
         search_dir: Directory to start searching from.
@@ -336,10 +391,16 @@ def find_manifest(search_dir: str | Path = ".") -> Path | None:
         for name in candidates:
             manifest_path = current / name
             if manifest_path.exists():
+                logger.info("Adopted manifest: %s", manifest_path)
                 return manifest_path
 
+        # Stop at a VCS project boundary — prevents climbing into a parent
+        # project and silently loading an unrelated manifest.
+        if any((current / b).exists() for b in _MANIFEST_BOUNDARY_DIRS):
+            break
+
         parent = current.parent
-        if parent == current:
+        if parent == current:  # reached the filesystem root
             break
         current = parent
 

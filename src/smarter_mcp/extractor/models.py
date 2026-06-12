@@ -26,6 +26,24 @@ class _MISSING_TYPE:
 MISSING = _MISSING_TYPE()
 
 
+class _NON_LITERAL_TYPE:
+    """Sentinel indicating a parameter default is non-literal (e.g. datetime.now()).
+
+    Stored by the AST extractor when a default expression cannot be evaluated
+    via ``ast.literal_eval``.  Callers must NOT emit this value as a JSON
+    schema default or use it for type inference.
+    """
+
+    def __repr__(self) -> str:
+        return "<NON_LITERAL>"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+NON_LITERAL = _NON_LITERAL_TYPE()
+
+
 class CallableKind(str, Enum):
     """The kind of callable extracted from source code."""
 
@@ -113,8 +131,24 @@ class ExtractedCallable:
 
     @property
     def non_self_params(self) -> list[ExtractedParam]:
-        """Parameters excluding 'self' and 'cls'."""
-        return [p for p in self.parameters if p.name not in ("self", "cls")]
+        """Parameters excluding the implicit instance/class receiver.
+
+        Only the first positional parameter of METHOD, CLASSMETHOD, and PROPERTY
+        callables is stripped — and only when its name is the conventional
+        ``self`` or ``cls``.  Free functions (FUNCTION) and static methods
+        (STATICMETHOD) are returned unmodified, even if a parameter happens to be
+        named ``self`` or ``cls``.
+        """
+        if self.kind in (CallableKind.METHOD, CallableKind.PROPERTY):
+            if self.parameters and self.parameters[0].name == "self":
+                return self.parameters[1:]
+            return list(self.parameters)
+        if self.kind == CallableKind.CLASSMETHOD:
+            if self.parameters and self.parameters[0].name == "cls":
+                return self.parameters[1:]
+            return list(self.parameters)
+        # FUNCTION, STATICMETHOD — no implicit receiver
+        return list(self.parameters)
 
     @property
     def non_variadic_params(self) -> list[ExtractedParam]:

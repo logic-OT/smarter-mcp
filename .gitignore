@@ -33,6 +33,4 @@ logs/
 
 # Smarter-MCP runtime artifacts (extraction cache, LLM description cache)
 .smarter-mcp/
-/docs/superpowers
-pending.md
 .claude/settings.json

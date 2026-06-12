@@ -34,7 +34,7 @@ class SchemaEndpoint:
     def __init__(
         self,
         registry: ToolRegistry,
-        router: "NamespaceRouter | None" = None,
+        router: NamespaceRouter | None = None,
     ):
         self.registry = registry
         # A1: when a router is provided, use it to determine which namespaces

@@ -71,11 +71,11 @@ def serve(
     if dev:
         try:
             import watchfiles
-        except ImportError:
+        except ImportError as exc:
             raise click.ClickException(
                 "Development dependency 'watchfiles' is required for hot-reloading (--dev). "
                 "Install it with `pip install smarter-mcp[dev]` or `pip install watchfiles`."
-            )
+            ) from exc
 
         # Resolve directory/parent directory to watch
         watch_path = Path.cwd()
@@ -271,12 +271,12 @@ def test(
         try:
             params = json.loads(params_json)
         except json.JSONDecodeError as e:
-            raise click.ClickException(f"Invalid JSON in --params: {e}")
+            raise click.ClickException(f"Invalid JSON in --params: {e}") from e
 
     try:
         report = app.test(tool_name=tool_name, params=params, verbose=False)
     except ValueError as e:
-        raise click.ClickException(str(e))
+        raise click.ClickException(str(e)) from e
 
     for result in report.results:
         status_symbol = click.style("✓ PASS", fg="green", bold=True) if result.passed else click.style("✗ FAIL", fg="red", bold=True)
@@ -463,7 +463,7 @@ sources:
         output_file.write_text(yaml_content, encoding="utf-8")
         click.echo(click.style(f"✓ Initialized Smarter-MCP manifest at '{output_file}'", fg="green", bold=True))
     except Exception as e:
-        raise click.ClickException(f"Failed to write manifest file: {e}")
+        raise click.ClickException(f"Failed to write manifest file: {e}") from e
 
 
 @cli.command()

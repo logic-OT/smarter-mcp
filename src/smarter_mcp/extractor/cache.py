@@ -276,7 +276,7 @@ class ExtractionCache:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             module = _decode_module(data)
-        except Exception as e:  # noqa: BLE001 — corrupt/incompatible entry → miss
+        except Exception as e:
             logger.debug("Ignoring unreadable cache entry %s: %s", path, e)
             return None
 
@@ -300,5 +300,5 @@ class ExtractionCache:
             data = json.dumps(_encode_module(module), default=_encode_default)
             tmp.write_text(data, encoding="utf-8")
             tmp.replace(self._path_for(key))  # atomic on POSIX
-        except Exception as e:  # noqa: BLE001 — caching is best-effort
+        except Exception as e:
             logger.debug("Could not write cache entry for %s: %s", module_name, e)

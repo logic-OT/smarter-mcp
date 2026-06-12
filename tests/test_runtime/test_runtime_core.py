@@ -15,7 +15,6 @@ import pytest
 
 from smarter_mcp._decorators import clear_global_registry
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -45,8 +44,8 @@ def _tool_value(result) -> str | None:
 @pytest.mark.asyncio
 async def test_c1_string_return_not_coerced_to_image():
     """greet() returns a plain string; it must survive the wrapper unchanged."""
-    import asyncio
     from fastmcp import Client
+
     from smarter_mcp import SmarterMCP, tool
 
     @tool("Greet a user")
@@ -67,6 +66,7 @@ async def test_c1_string_return_not_coerced_to_image():
 async def test_c1_int_return_not_coerced():
     """An integer return value must pass through unchanged."""
     from fastmcp import Client
+
     from smarter_mcp import SmarterMCP, tool
 
     @tool("Add two numbers")
@@ -87,6 +87,7 @@ async def test_c1_int_return_not_coerced():
 async def test_c1_async_string_return_not_coerced():
     """Async str-returning tools are also fixed."""
     from fastmcp import Client
+
     from smarter_mcp import SmarterMCP, tool
 
     @tool("Async echo")
@@ -111,6 +112,7 @@ async def test_c1_async_string_return_not_coerced():
 async def test_c2_session_lifecycle_increments():
     """Two bump() calls in one session must return 1 then 2 (not 1, 1)."""
     from fastmcp import Client
+
     from smarter_mcp import SmarterMCP
 
     # Write to a real module so class resolution via import works.
@@ -158,6 +160,7 @@ async def test_c2_session_lifecycle_increments():
 async def test_h10_staticmethod_tool():
     """A @staticmethod tool must be callable end-to-end."""
     from fastmcp import Client
+
     from smarter_mcp import SmarterMCP
 
     tmp = Path(tempfile.mkdtemp())
@@ -193,6 +196,7 @@ async def test_h10_staticmethod_tool():
 async def test_h10_classmethod_tool():
     """A @classmethod tool must be callable end-to-end."""
     from fastmcp import Client
+
     from smarter_mcp import SmarterMCP
 
     tmp = Path(tempfile.mkdtemp())
@@ -233,6 +237,7 @@ async def test_h10_classmethod_tool():
 async def test_m5_context_param_not_named_ctx():
     """A tool with `context: Context` (not `ctx`) must not raise TypeError."""
     from fastmcp import Client, Context
+
     from smarter_mcp import SmarterMCP, tool
 
     @tool("Returns request_id via context")
@@ -257,8 +262,8 @@ async def test_m5_context_param_not_named_ctx():
 
 def test_h20_singleton_thread_safe():
     """Singleton creation under concurrent access produces exactly one instance."""
-    from smarter_mcp.runtime.instances import InstanceManager
     from smarter_mcp.config.manifest import InstanceConfig
+    from smarter_mcp.runtime.instances import InstanceManager
 
     class _DB:
         instances_created = 0
@@ -300,8 +305,9 @@ def test_h20_singleton_thread_safe():
 def test_h20_session_instance_thread_safe():
     """Session-instance creation for the same session_id is idempotent under threads."""
     import types
-    from smarter_mcp.runtime.instances import InstanceManager
+
     from smarter_mcp.config.manifest import InstanceConfig
+    from smarter_mcp.runtime.instances import InstanceManager
 
     class _Conn:
         instances_created = 0
@@ -351,8 +357,9 @@ def test_h20_session_instance_thread_safe():
 def test_eviction_calls_close_on_oldest_session():
     """Creating max_sessions+1 distinct sessions evicts the oldest and calls close()."""
     import types
-    from smarter_mcp.runtime.instances import InstanceManager
+
     from smarter_mcp.config.manifest import InstanceConfig
+    from smarter_mcp.runtime.instances import InstanceManager
 
     close_calls: list[int] = []
 
@@ -390,8 +397,9 @@ def test_id_ctx_fallback_emits_warning(caplog):
     """ctx with no session_id/client_id triggers a logger.warning naming the class."""
     import logging
     import types
-    from smarter_mcp.runtime.instances import InstanceManager
+
     from smarter_mcp.config.manifest import InstanceConfig
+    from smarter_mcp.runtime.instances import InstanceManager
 
     class _Plain:
         pass
@@ -415,8 +423,8 @@ def test_id_ctx_fallback_emits_warning(caplog):
 
 def test_m4_build_idempotent_no_duplicate_tests():
     """Calling build() twice must not duplicate tool.tests entries."""
-    import yaml
     import tempfile as tf
+
     from smarter_mcp import SmarterMCP
 
     # Write a source file and a manifest that wires a test to the tool

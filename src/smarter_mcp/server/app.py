@@ -14,9 +14,10 @@ from __future__ import annotations
 import importlib
 import logging
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from fastmcp import FastMCP
 
@@ -102,12 +103,17 @@ def _fix_package_module_names(
         prefix_old = old_name + "." if old_name else ""
         prefix_new = new_name + "."
 
-        def _fix_qname(qname: str) -> str:
-            if qname.startswith(prefix_old):
-                return prefix_new + qname[len(prefix_old):]
+        def _fix_qname(
+            qname: str,
+            _new: str = new_name,
+            _pold: str = prefix_old,
+            _pnew: str = prefix_new,
+        ) -> str:
+            if qname.startswith(_pold):
+                return _pnew + qname[len(_pold):]
             # Bare name with no prefix (happens when old_name is "")
-            if not prefix_old:
-                return f"{new_name}.{qname}" if qname else new_name
+            if not _pold:
+                return f"{_new}.{qname}" if qname else _new
             return qname
 
         new_functions = [
@@ -582,7 +588,7 @@ class SmarterMCP:
             extracted_mod = ExtractedModule(module_path="", module_name=class_module_name)
             impls: dict[str, Any] = {}
 
-            for mname, obj in py_inspect.getmembers(cls, predicate=py_inspect.isroutine):
+            for mname, _obj in py_inspect.getmembers(cls, predicate=py_inspect.isroutine):
                 if include and mname not in include:
                     continue
                 if exclude and mname in exclude:
@@ -794,7 +800,7 @@ class SmarterMCP:
                 lifecycle=lifecycle,
                 args=constructor_args
             )
-            for name, fn in cls.__dict__.items():
+            for _name, fn in cls.__dict__.items():
                 if getattr(fn, "_smarter_mcp_tool", False):
                     self._registry.register_tool(
                         fn,
@@ -900,7 +906,7 @@ class SmarterMCP:
                 LLMGenerator(self._config.llm).enrich_registry(self._registry)
             except LLMNotAvailableError as e:
                 logger.warning("LLM description generation skipped: %s", e)
-            except Exception as e:  # noqa: BLE001 - never block server build
+            except Exception as e:
                 logger.warning("LLM description generation failed: %s", e)
 
         # Step 3: Build router + server

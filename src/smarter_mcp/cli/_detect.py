@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 import sys
 from pathlib import Path
-from typing import Any
 
 import click
 
@@ -40,7 +38,7 @@ def detect_app(filepath: Path) -> SmarterMCP:
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
     except Exception as e:
-        raise click.ClickException(f"Failed to import Python file '{filepath}': {e}")
+        raise click.ClickException(f"Failed to import Python file '{filepath}': {e}") from e
 
     # 1. Try conventional names first
     for name in ["app", "server", "mcp", "smarter_mcp"]:

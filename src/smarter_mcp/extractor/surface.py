@@ -22,7 +22,6 @@ import inspect
 import logging
 import os
 import sys
-import textwrap
 import threading
 from dataclasses import replace
 from pathlib import Path
@@ -405,7 +404,7 @@ def _enrich_param_from_inspect(
                 if hasattr(inspect_param.annotation, "__name__")
                 else str(inspect_param.annotation)
             )
-        except Exception:
+        except Exception:  # noqa: S110 — annotation repr is best-effort; skip on failure
             pass
 
     # Prefer inspect default
@@ -452,7 +451,7 @@ def _enrich_callable_from_inspect(
                 if hasattr(sig.return_annotation, "__name__")
                 else str(sig.return_annotation)
             )
-        except Exception:
+        except Exception:  # noqa: S110 — return-type repr is best-effort; skip on failure
             pass
 
     return replace(

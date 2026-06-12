@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from enum import Enum
 
 from .models import DocstringFormat
 
@@ -260,7 +259,7 @@ def _parse_numpy_returns(body: str, result: ParsedDocstring) -> None:
         result.returns = parts[1].strip()
     else:
         result.returns_type = first
-        result.returns = " ".join(l.strip() for l in lines[1:] if l.strip())
+        result.returns = " ".join(ln.strip() for ln in lines[1:] if ln.strip())
 
 
 def _parse_numpy_raises(body: str, result: ParsedDocstring) -> None:
@@ -297,7 +296,7 @@ def _parse_sphinx(docstring: str) -> ParsedDocstring:
             break
         summary_lines.append(line.strip())
 
-    result.summary = " ".join(l for l in summary_lines if l).strip()
+    result.summary = " ".join(ln for ln in summary_lines if ln).strip()
 
     # Parse directives
     param_re = re.compile(r"^\s*:param\s+(\w+)\s*:\s*(.*)$")

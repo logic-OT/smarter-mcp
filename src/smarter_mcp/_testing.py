@@ -21,7 +21,6 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import logging
 import time
@@ -393,7 +392,7 @@ class ToolTestRunner:
                     mod = importlib.import_module(module_name)
                     cls_obj = getattr(mod, class_name)
                     return cls_obj()
-                except Exception:
+                except Exception:  # noqa: S110 — best-effort import; failure is handled below
                     pass
 
         raise RuntimeError(

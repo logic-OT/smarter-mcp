@@ -7,8 +7,8 @@ and serializability.
 """
 
 import pytest
-from smarter_mcp import SmarterMCP, tool
 
+from smarter_mcp import SmarterMCP, tool
 
 # ──────────────────────────────────────────────────────────────────────
 # Helpers: set up a SmarterMCP app with various tool shapes

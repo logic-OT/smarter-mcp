@@ -12,7 +12,8 @@ from __future__ import annotations
 import functools
 import inspect
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
@@ -112,7 +113,7 @@ def build_tool_wrapper(
     )
     new_params = []
     first_param = True
-    for name, param in sig.parameters.items():
+    for _name, param in sig.parameters.items():
         if should_skip_first and first_param:
             first_param = False
             continue  # drop 'self'

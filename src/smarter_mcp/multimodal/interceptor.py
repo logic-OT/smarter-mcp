@@ -49,7 +49,7 @@ _NUMPY_AVAILABLE = None
 # H3: safe pixel cap — 89 million pixels matches Pillow's own default but we
 # set it explicitly so our limit is not silently loosened by future Pillow
 # releases that ship a higher default.
-_SAFE_MAX_IMAGE_PIXELS = 89_478_485  # ~8192×8192 @ 4 bytes/pixel ≈ 340 MB uncompressed
+_SAFE_MAX_IMAGE_PIXELS = 89_478_485  # ~8192x8192 @ 4 bytes/pixel ~= 340 MB uncompressed
 
 
 def _set_pil_pixel_limit() -> None:
@@ -127,7 +127,7 @@ def _is_raw_ip_blocked(ip_str: str) -> bool:
         # I3: treat unparseable resolved address as blocked (fail closed).
         raise CoercionError(
             f"Cannot parse resolved IP address {ip_str!r}: treating as blocked"
-        )
+        ) from None
 
     # C2: unwrap IPv4-mapped IPv6 and check the mapped IPv4 against IPv4 nets.
     if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
@@ -220,7 +220,7 @@ class _SSRFGuardedHTTPConnection(http.client.HTTPConnection):
             raise CoercionError(
                 f"SSRF blocked: connected IP {peer_ip!r} could not be validated "
                 "(treated as blocked)"
-            )
+            ) from None
         if blocked:
             self.sock.close()
             raise CoercionError(
@@ -248,7 +248,7 @@ class _SSRFGuardedHTTPSConnection(http.client.HTTPSConnection):
             raise CoercionError(
                 f"SSRF blocked: connected IP {peer_ip!r} could not be validated "
                 "(treated as blocked)"
-            )
+            ) from None
         if blocked:
             self.sock.close()
             raise CoercionError(
@@ -301,7 +301,7 @@ def _fetch_url_blocking(url: str, timeout: float, max_bytes: int) -> bytes:
     # C1: Use the guarded opener so the peer IP is validated at connect time,
     # not just at pre-validation time (defeats DNS rebinding).
     opener = _make_ssrf_guarded_opener()
-    req = urllib.request.Request(url, headers={"User-Agent": "smarter-mcp/image-fetch"})
+    req = urllib.request.Request(url, headers={"User-Agent": "smarter-mcp/image-fetch"})  # noqa: S310 — URL pre-validated by _assert_url_safe + SSRF-guarded opener
     try:
         with opener.open(req, timeout=timeout) as resp:
             # Re-validate after potential redirect.
@@ -388,7 +388,7 @@ def _enforce_image_size(img: Any, max_size: tuple[int, int]) -> Any:
     max_w, max_h = max_size
     if w > max_w or h > max_h:
         raise CoercionError(
-            f"Image dimensions {w}×{h} exceed configured maximum {max_w}×{max_h}. "
+            f"Image dimensions {w}x{h} exceed configured maximum {max_w}x{max_h}. "
             "Resize the image before sending it as a tool parameter."
         )
     return img
@@ -401,7 +401,7 @@ def _enforce_image_size(img: Any, max_size: tuple[int, int]) -> Any:
 def resolve_image_input(
     val: Any,
     target_type: str,
-    config: "MultimodalConfig | None" = None,
+    config: MultimodalConfig | None = None,
 ) -> Any:
     """Resolve the input value and load it into the target image type.
 
@@ -418,7 +418,7 @@ def resolve_image_input(
             (e.g. "pil.image.image", "numpy.ndarray").
         config: Optional MultimodalConfig carrying security limits.  When None,
             defaults are applied (URL fetch OFF, local file OFF, 10 MB cap,
-            1024×1024 pixel limit).
+            1024x1024 pixel limit).
 
     Returns:
         A PIL.Image.Image or numpy.ndarray ready for the tool function.
@@ -498,7 +498,7 @@ def resolve_image_input(
                     raise CoercionError(
                         f"Cannot resolve image input: not a valid URL, file path, "
                         f"or base64 string (scheme={parsed.scheme!r})"
-                    )
+                    ) from None
 
     if data is None:
         raise CoercionError(
@@ -548,7 +548,7 @@ def resolve_image_input(
 async def resolve_image_input_async(
     val: Any,
     target_type: str,
-    config: "MultimodalConfig | None" = None,
+    config: MultimodalConfig | None = None,
 ) -> Any:
     """Async version of ``resolve_image_input``.
 

@@ -131,7 +131,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-def assert_auth_keys_present(config: "ServerConfig") -> None:
+def assert_auth_keys_present(config: ServerConfig) -> None:
     """Raise ``RuntimeError`` if auth is enabled but no keys are configured.
 
     H7 / A2: fail-closed guarantee — a server that is supposed to be
@@ -151,7 +151,7 @@ def assert_auth_keys_present(config: "ServerConfig") -> None:
         )
 
 
-def build_auth_provider(config: "ServerConfig"):
+def build_auth_provider(config: ServerConfig):
     """Build a FastMCP Bearer token verifier from the configured API keys.
 
     Returns None if auth is disabled.
@@ -197,7 +197,7 @@ def session_client_id(context) -> str:
 class _SlidingWindow:
     """Per-client sliding-window counter. Tracks request timestamps in a deque."""
 
-    __slots__ = ("timestamps", "last_seen")
+    __slots__ = ("last_seen", "timestamps")
 
     def __init__(self) -> None:
         self.timestamps: deque[float] = deque()
@@ -221,7 +221,7 @@ class SlidingWindowMiddleware(Middleware):
     FastMCP's built-in SlidingWindowRateLimitingMiddleware stores one deque per
     session ID and never removes them — on a server with many short-lived
     connections the dict grows without bound. This implementation evicts any
-    bucket whose last request is older than `evict_after_seconds` (default: 2×
+    bucket whose last request is older than `evict_after_seconds` (default: 2x
     the rate window) during every request, so memory stays proportional to the
     number of *active* sessions, not all-time sessions.
     """
@@ -373,7 +373,7 @@ class IPRateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-def build_rate_limit_middleware(config: "ServerConfig") -> list:
+def build_rate_limit_middleware(config: ServerConfig) -> list:
     """Build per-session and global sliding-window rate-limit middleware.
 
     Returns an empty list if rate limiting is disabled.
@@ -394,7 +394,7 @@ def build_rate_limit_middleware(config: "ServerConfig") -> list:
 
 
 def build_ip_rate_limit_middleware(
-    config: "ServerConfig",
+    config: ServerConfig,
     *,
     app: Any,
 ) -> Any | None:

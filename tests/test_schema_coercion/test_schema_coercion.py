@@ -24,7 +24,6 @@ import pytest
 from smarter_mcp.errors import CoercionError
 from smarter_mcp.runtime.coercion import _coerce_value_from_str
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────

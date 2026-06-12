@@ -44,7 +44,7 @@ class TestIPRateLimitMiddleware:
         app = self._make_app(max_requests=3)
         client = TestClient(app, raise_server_exceptions=False)
 
-        for i in range(3):
+        for _i in range(3):
             resp = client.get("/test")
             assert resp.status_code == 200
 

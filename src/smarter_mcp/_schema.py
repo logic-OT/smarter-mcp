@@ -12,7 +12,8 @@ ToolTestRunner (for schema validation checks).
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from smarter_mcp._registry import RegisteredTool
 from smarter_mcp._typeparse import is_multimodal_type, type_str_to_json_schema

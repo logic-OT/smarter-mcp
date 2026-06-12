@@ -15,8 +15,7 @@ from __future__ import annotations
 import ast
 from typing import Any
 
-from .models import MISSING, _MISSING_TYPE, _NON_LITERAL_TYPE
-
+from .models import _MISSING_TYPE, _NON_LITERAL_TYPE
 
 # ──────────────────────────────────────────────────────────────────────
 # Default value inference

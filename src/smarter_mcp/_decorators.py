@@ -1,4 +1,5 @@
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 # Valid lifecycle values for @toolkit — mirrors the Literal in manifest.InstanceConfig.
 _VALID_LIFECYCLES: frozenset[str] = frozenset({"session", "singleton", "per-call"})
@@ -63,7 +64,7 @@ def tool(
         fn._smarter_mcp_name = resolved_name
         fn._smarter_mcp_description = resolved_description
         fn._smarter_mcp_tests = tests or []
-        
+
         register_global_tool(fn)
         return fn
 
@@ -97,7 +98,7 @@ def resource(
         fn._smarter_mcp_resource = True
         fn._smarter_mcp_uri = resolved_uri
         fn._smarter_mcp_description = resolved_description
-        
+
         register_global_resource(fn)
         return fn
 
@@ -141,7 +142,7 @@ def toolkit(
         cls._smarter_mcp_lifecycle = lifecycle
         cls._smarter_mcp_namespace = resolved_namespace
         cls._smarter_mcp_constructor_args = constructor_args or {}
-        
+
         register_global_toolkit(cls)
         return cls
 

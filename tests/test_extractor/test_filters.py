@@ -8,13 +8,11 @@ import pytest
 
 from smarter_mcp.extractor.filters import (
     ExposureRules,
-    FilterResult,
-    UnannotatedPolicy,
     VariadicPolicy,
     apply_filters,
 )
-from smarter_mcp.extractor.surface import SurfaceExtractor
 from smarter_mcp.extractor.models import ExtractionResult
+from smarter_mcp.extractor.surface import SurfaceExtractor
 
 
 class TestFilters:
@@ -60,7 +58,7 @@ class TestFilters:
                     """Dunder method."""
                     pass
         ''')
-        extractor = SurfaceExtractor("/tmp", use_inspect=False)
+        extractor = SurfaceExtractor("/tmp", use_inspect=False)  # noqa: S108 — dummy root path, no file I/O
         module = extractor.extract_source(source, "test.py", "test")
         return ExtractionResult(modules=[module])
 

@@ -108,7 +108,7 @@ class LLMGenerator:
 
     @staticmethod
     def _cache_key(signature: str, docstring: str) -> str:
-        digest = hashlib.sha256(f"{signature}\n---\n{docstring}".encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(f"{signature}\n---\n{docstring}".encode()).hexdigest()
         return digest
 
     # ── client (lazy) ──────────────────────────────────────────────────

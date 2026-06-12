@@ -282,7 +282,7 @@ def _coerce_int(val: Any, type_str: str, param_name: str) -> int:
         except ValueError:
             raise CoercionError(
                 f"Cannot coerce {val!r} to 'int' for parameter '{param_name}'"
-            )
+            ) from None
         if math.isinf(f) or math.isnan(f):
             raise CoercionError(
                 f"Cannot coerce non-finite float string {val!r} to int "

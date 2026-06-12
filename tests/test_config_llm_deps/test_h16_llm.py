@@ -2,17 +2,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 from smarter_mcp._registry import RegisteredTool, ToolRegistry
 from smarter_mcp.config.manifest import LLMConfig
-from smarter_mcp.llm.client import LLMNotAvailableError, OpenAIClient
+from smarter_mcp.llm.client import OpenAIClient
 from smarter_mcp.llm.generator import LLMGenerator
 from smarter_mcp.server.router import _build_tool_description
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -60,7 +56,7 @@ class TestOpenAIClientTimeout:
             config = _make_config(tmp_path)
             try:
                 OpenAIClient(config)
-            except Exception:
+            except Exception:  # noqa: S110 — intentional swallow; we only care about captured_kwargs
                 pass  # FakeOpenAI has no chat attr
 
         assert "timeout" in captured_kwargs, (
@@ -87,7 +83,7 @@ class TestOpenAIClientTimeout:
             config = _make_config(tmp_path)
             try:
                 OpenAIClient(config)
-            except Exception:
+            except Exception:  # noqa: S110 — intentional swallow; we only care about captured_kwargs
                 pass
 
         assert "max_retries" in captured_kwargs, (

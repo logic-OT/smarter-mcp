@@ -11,6 +11,7 @@ The manifest is the control plane. It defines:
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -18,6 +19,8 @@ from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -239,6 +242,13 @@ class ManifestConfig(BaseModel):
     version: str = "0.1.0"
     description: str = ""
 
+    manifest_dir: str | None = None
+    """Directory containing the manifest file. Set at load time, not from YAML.
+
+    Used to resolve relative source paths against the manifest's own location
+    rather than CWD (H14 fix).
+    """
+
     server: ServerConfig = Field(default_factory=ServerConfig)
     sources: list[SourceConfig] = Field(default_factory=list)
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
@@ -283,13 +293,14 @@ def load_manifest(path: str | Path) -> ManifestConfig:
         path: Path to the YAML manifest file.
 
     Returns:
-        Validated ManifestConfig.
+        Validated ManifestConfig with ``manifest_dir`` set to the file's
+        parent directory so callers can resolve relative source paths (H14).
 
     Raises:
         FileNotFoundError: If the manifest file doesn't exist.
         ValueError: If the manifest fails validation.
     """
-    path = Path(path)
+    path = Path(path).resolve()
     if not path.exists():
         raise FileNotFoundError(f"Manifest not found: {path}")
 
@@ -297,7 +308,11 @@ def load_manifest(path: str | Path) -> ManifestConfig:
     if raw is None:
         raw = {}
 
-    return ManifestConfig.model_validate(raw)
+    config = ManifestConfig.model_validate(raw)
+    # H14: record the manifest's directory so relative source paths can be
+    # resolved against it rather than CWD.
+    config.manifest_dir = str(path.parent)
+    return config
 
 
 def default_manifest(source_path: str = ".") -> ManifestConfig:
@@ -317,10 +332,17 @@ def default_manifest(source_path: str = ".") -> ManifestConfig:
     )
 
 
+_MANIFEST_BOUNDARY_DIRS = frozenset({".git", ".hg", ".svn"})
+
+
 def find_manifest(search_dir: str | Path = ".") -> Path | None:
     """Search for a manifest file in the given directory and parents.
 
     Looks for: smarter-mcp.yaml, smarter-mcp.yml, .smarter-mcp.yaml
+
+    The upward walk stops at a VCS project boundary (.git / .hg / .svn) so a
+    stray manifest in a parent project cannot silently hijack configuration
+    (C3 fix).  Logs at INFO which manifest was adopted.
 
     Args:
         search_dir: Directory to start searching from.
@@ -336,10 +358,16 @@ def find_manifest(search_dir: str | Path = ".") -> Path | None:
         for name in candidates:
             manifest_path = current / name
             if manifest_path.exists():
+                logger.info("Adopted manifest: %s", manifest_path)
                 return manifest_path
 
+        # Stop at a VCS project boundary — prevents climbing into a parent
+        # project and silently loading an unrelated manifest.
+        if any((current / b).exists() for b in _MANIFEST_BOUNDARY_DIRS):
+            break
+
         parent = current.parent
-        if parent == current:
+        if parent == current:  # reached the filesystem root
             break
         current = parent
 

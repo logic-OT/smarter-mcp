@@ -148,10 +148,37 @@ def validate(target: str | None, manifest: str | None):
     app = resolve_target(target, manifest)
     app.build()
 
+    # C5: surface extraction errors and warnings so the user knows which files
+    # failed to parse, and exit non-zero when there are errors.
+    extraction = getattr(app, "extraction_result", None)
+    has_errors = False
+    if extraction is not None:
+        if extraction.errors:
+            has_errors = True
+            click.echo(click.style(
+                f"Extraction Errors ({len(extraction.errors)}):", fg="red", bold=True
+            ))
+            for err in extraction.errors:
+                click.echo(click.style(f"  ERROR: {err}", fg="red"))
+        if extraction.warnings:
+            click.echo(click.style(
+                f"Extraction Warnings ({len(extraction.warnings)}):", fg="yellow", bold=True
+            ))
+            for w in extraction.warnings:
+                click.echo(click.style(f"  WARNING: {w}", fg="yellow"))
+
     click.echo(f"Server Name: {app.config.name}")
     click.echo(f"Transport:   {app.config.server.transport}")
     click.echo(f"Host/Port:   {app.config.server.host}:{app.config.server.port}")
     click.echo("-" * 40)
+
+    # C5: exit non-zero here so the early-return path below doesn't swallow errors.
+    if has_errors:
+        click.echo(click.style(
+            "✗ Validation failed: extraction errors found (see above).",
+            fg="red", bold=True,
+        ))
+        sys.exit(1)
 
     namespaces = app._registry.get_all_namespaces()
     if not namespaces:
@@ -212,7 +239,8 @@ def validate(target: str | None, manifest: str | None):
         click.echo(click.style(f"Warnings ({len(warnings)}):", fg="yellow", bold=True))
         for w in warnings:
             click.echo(click.style(f"  ○ {w}", fg="yellow"))
-    else:
+
+    if not warnings:
         click.echo("-" * 40)
         click.echo(click.style("✓ Validation successful! No issues or warnings found.", fg="green", bold=True))
 

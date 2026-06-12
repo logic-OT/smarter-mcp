@@ -12,6 +12,7 @@ collision-free tool naming:
 from __future__ import annotations
 
 import asyncio
+import importlib
 import inspect
 import logging
 from typing import Any, Callable
@@ -61,7 +62,14 @@ def _build_tool_name(
 
     Functions: use the function name directly.
     Methods: ClassName{separator}method_name to avoid collisions.
+
+    H12: if the user explicitly set the name via ``@tool(name="...")``, that
+    name is used verbatim — the class prefix is NOT stacked on top.
     """
+    # An explicit @tool(name=...) sets _smarter_mcp_name on the function.
+    # Respect that choice: don't prepend the class name.
+    if getattr(tool.fn, "_smarter_mcp_name", None) is not None:
+        return tool.name
     if tool.class_name and not tool.name.startswith(tool.class_name):
         return f"{tool.class_name}{separator}{tool.name}"
     return tool.name
@@ -138,7 +146,13 @@ class NamespaceRouter:
             sub_server = self._build_namespace_server(ns_name, registry)
             if sub_server:
                 self._namespaces[ns_name] = sub_server
-                self._root.mount(sub_server, namespace=ns_name)
+                # H12: the "default" namespace (used for @tool/@resource
+                # decorator-registered callables) must be mounted WITHOUT a
+                # prefix so a @tool greet is simply "greet", not "default_greet".
+                if ns_name == "default":
+                    self._root.mount(sub_server)  # namespace=None → no prefix
+                else:
+                    self._root.mount(sub_server, namespace=ns_name)
 
         return self._root
 
@@ -215,10 +229,56 @@ class NamespaceRouter:
         resource: RegisteredResource,
         namespace: str,
     ) -> None:
-        """Register a property as an MCP resource."""
-        description = _build_tool_description(resource)
+        """Register a property as an MCP resource.
 
+        H13: property getters are unbound ``fget`` functions that require a
+        ``self`` argument.  FastMCP rejects such callables (it sees an
+        unexpected first positional param).  We wrap them so that ``self`` is
+        resolved via the InstanceManager at call time, exactly as
+        ``_build_method_wrapper`` does for tools.
+        """
+        description = _build_tool_description(resource)
         impl = resource.fn
+
+        # H13: bind property getter when we have class context
+        if (
+            resource.extracted_obj is not None
+            and resource.extracted_obj.class_name is not None
+            and self.instance_manager is not None
+        ):
+            class_name = resource.extracted_obj.class_name
+            # Derive the module from the qualified name: "mod.Cls.prop" -> "mod"
+            qualified = resource.extracted_obj.qualified_name
+            qparts = qualified.rsplit(".", 2)
+            module_name = qparts[0] if len(qparts) == 3 else resource.extracted_obj.module_path.replace("/", ".").rstrip(".py")
+
+            try:
+                mod = importlib.import_module(module_name)
+                cls_obj = getattr(mod, class_name)
+            except Exception as exc:
+                logger.warning(
+                    "Cannot bind property resource %s: could not load %s.%s: %s",
+                    resource.uri, module_name, class_name, exc,
+                )
+            else:
+                orig_fn = impl
+                mgr = self.instance_manager
+
+                def _bound_getter(
+                    _fn=orig_fn,
+                    _cls_name=class_name,
+                    _cls=cls_obj,
+                ) -> Any:
+                    ctx = None
+                    try:
+                        from fastmcp.server.dependencies import get_context
+                        ctx = get_context()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    instance = mgr.get_instance(_cls_name, _cls, ctx)
+                    return _fn(instance)
+
+                impl = _bound_getter
 
         try:
             server.resource(resource.uri, description=description)(impl)

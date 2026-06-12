@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
 from .extractor.models import ExtractedCallable, ExtractionResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -134,22 +137,32 @@ class ToolRegistry:
     ) -> None:
         """Merge auto-discovered tools/resources into the registry."""
         for mod in extraction.modules:
-            ns = namespace_override or mod.module_name.split(".")[-1] or "default"
+            # H12: use the full dotted module path for the namespace so that
+            # a/utils.py (module "a.utils") and b/utils.py (module "b.utils")
+            # get different namespaces ("a_utils" vs "b_utils") and do not
+            # silently collide on the last segment "utils".
+            if namespace_override:
+                ns = namespace_override
+            elif mod.module_name:
+                ns = "_".join(mod.module_name.split("."))
+            else:
+                ns = "default"
+
             for obj in mod.all_callables:
                 # Resolve the implementation function
                 impl_key = f"{mod.module_name}.{obj.simple_name}"
                 if obj.class_name:
                     impl_key = f"{mod.module_name}.{obj.class_name}.{obj.simple_name}"
-                
+
                 fn = implementations.get(impl_key)
                 if not fn:
                     continue
-                
+
                 is_resource = getattr(fn, "_smarter_mcp_resource", False)
                 if obj.kind == "property" or is_resource:
                     uri = getattr(fn, "_smarter_mcp_uri", None) or f"resource://{ns}/{obj.class_name}/{obj.simple_name}"
                     description = getattr(fn, "_smarter_mcp_description", None) or obj.docstring
-                    
+
                     res = RegisteredResource(
                         uri=uri,
                         description=description,
@@ -166,7 +179,7 @@ class ToolRegistry:
                     tool_name = getattr(fn, "_smarter_mcp_name", None) or obj.tool_name
                     description = getattr(fn, "_smarter_mcp_description", None) or obj.docstring
                     tests = getattr(fn, "_smarter_mcp_tests", [])
-                        
+
                     tool = RegisteredTool(
                         name=tool_name,
                         description=description,
@@ -180,10 +193,22 @@ class ToolRegistry:
                     )
                     if ns not in self._tools:
                         self._tools[ns] = {}
-                        
-                    # Decorator wins over discovery
+
                     existing = self._tools[ns].get(tool_name)
-                    if not existing or existing.source != "decorator":
+                    if existing is None:
+                        self._tools[ns][tool_name] = tool
+                    elif existing.source == "decorator":
+                        # Decorator-registered tools always win silently.
+                        pass
+                    else:
+                        # H12: warn on silent collision so operators know what
+                        # happened instead of getting last-write-wins silently.
+                        logger.warning(
+                            "Tool name collision in namespace '%s': '%s' is being "
+                            "overwritten (previous source=%s, new source=%s). "
+                            "Consider namespace overrides or renaming.",
+                            ns, tool_name, existing.source, tool.source,
+                        )
                         self._tools[ns][tool_name] = tool
 
     def merge_module(

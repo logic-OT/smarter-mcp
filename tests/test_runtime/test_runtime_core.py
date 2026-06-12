@@ -57,7 +57,8 @@ async def test_c1_string_return_not_coerced_to_image():
     server = app.build()
 
     async with Client(server) as client:
-        res = await client.call_tool("default_greet", {"name": "Ada"})
+        # H12: "default" namespace is mounted without prefix → tool is "greet"
+        res = await client.call_tool("greet", {"name": "Ada"})
         value = _tool_value(res)
         assert value == "Hello, Ada!", f"Expected 'Hello, Ada!' got {value!r}"
 
@@ -76,7 +77,8 @@ async def test_c1_int_return_not_coerced():
     server = app.build()
 
     async with Client(server) as client:
-        res = await client.call_tool("default_add", {"a": 3, "b": 4})
+        # H12: "default" namespace is mounted without prefix → tool is "add"
+        res = await client.call_tool("add", {"a": 3, "b": 4})
         value = _tool_value(res)
         assert value == "7", f"Expected '7', got {value!r}"
 
@@ -95,7 +97,8 @@ async def test_c1_async_string_return_not_coerced():
     server = app.build()
 
     async with Client(server) as client:
-        res = await client.call_tool("default_echo", {"msg": "ping"})
+        # H12: "default" namespace is mounted without prefix → tool is "echo"
+        res = await client.call_tool("echo", {"msg": "ping"})
         value = _tool_value(res)
         assert value == "ping", f"Expected 'ping' got {value!r}"
 
@@ -241,8 +244,9 @@ async def test_m5_context_param_not_named_ctx():
     server = app.build()
 
     async with Client(server) as client:
+        # H12: "default" namespace is mounted without prefix → tool is "get_id"
         # Should not raise TypeError about unexpected keyword argument
-        res = await client.call_tool("default_get_id", {})
+        res = await client.call_tool("get_id", {})
         value = _tool_value(res)
         assert value == "ok", f"Expected 'ok' got {value!r}"
 

@@ -58,7 +58,7 @@ class OpenAIClient(LLMClient):
         except ImportError as e:
             raise LLMNotAvailableError(
                 "The 'openai' package is required for LLM description generation. "
-                "Install it with: pip install smarter-mcp"
+                "Install it with: pip install smarter-mcp[llm]"
             ) from e
 
         provider = _normalize_provider(config.provider)

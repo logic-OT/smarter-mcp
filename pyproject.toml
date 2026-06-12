@@ -25,24 +25,27 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    "fastmcp>=3.0",
+    # Pin to tested minor range; code imports deep internals:
+    # fastmcp.server.middleware.middleware, auth.providers.jwt.StaticTokenVerifier,
+    # server.dependencies.get_context — these are not stable public API.
+    "fastmcp>=3.3.1,<4",
     "click>=8.0",
     "pydantic>=2.0",
     "pyyaml>=6.0",
-    "jinja2>=3.0",
-    "structlog>=23.0",
-    "openai>=1.0",
 ]
 
 [project.optional-dependencies]
 multimodal = ["Pillow>=10.0", "numpy>=1.24"]
+# openai is optional: only needed for LLM-assisted description generation.
+# The lazy-import machinery in llm/client.py raises LLMNotAvailableError when absent.
+llm = ["openai>=1.0"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "watchfiles>=0.20",
     "ruff>=0.4",
 ]
-all = ["smarter-mcp[multimodal,dev]"]
+all = ["smarter-mcp[multimodal,llm,dev]"]
 
 [project.scripts]
 smarter-mcp = "smarter_mcp.cli.main:cli"

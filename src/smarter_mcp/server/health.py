@@ -51,9 +51,10 @@ class HealthEndpoint:
             else 0
         )
         # failed_modules covers both AST-parse failures and import failures.
-        failed_modules = extraction_errors + self._import_failure_count
+        import_failures = self._import_failure_count
+        failed_modules = extraction_errors + import_failures
 
-        status = "degraded" if (extraction_errors > 0 or failed_modules > 0) else "healthy"
+        status = "degraded" if failed_modules > 0 else "healthy"
 
         return {
             "status": status,
@@ -62,6 +63,7 @@ class HealthEndpoint:
             "tool_count": tool_count,
             "resource_count": resource_count,
             "extraction_errors": extraction_errors,
+            "import_failures": import_failures,
             "failed_modules": failed_modules,
             "version": __version__,
         }

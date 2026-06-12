@@ -32,8 +32,15 @@ from smarter_mcp.extractor.filters import (
     VariadicPolicy,
     apply_filters,
 )
-from smarter_mcp.extractor.models import ExtractionResult, ExtractedModule, ExtractedCallable, CallableKind
-from smarter_mcp.extractor.surface import SurfaceExtractor, _SYS_PATH_LOCK
+from smarter_mcp.extractor.models import (
+    ExtractionResult,
+    ExtractedCallable,
+    ExtractedModule,
+    ExtractedParam,
+    CallableKind,
+    ParamKind,
+)
+from smarter_mcp.extractor.surface import SurfaceExtractor, _SYS_PATH_LOCK, _INSPECT_PARAM_KIND_MAP
 from smarter_mcp.runtime.instances import InstanceManager
 from smarter_mcp.server.router import NamespaceRouter
 from smarter_mcp._registry import ToolRegistry
@@ -474,12 +481,18 @@ class SmarterMCP:
             )
 
         # M8: accumulate results so the public property is always populated.
+        # Use dataclasses.replace to build a fresh object instead of mutating
+        # the previous ExtractionResult's lists in place, which would corrupt
+        # any cached reference held by the extractor.
         if self._extraction is None:
             self._extraction = extraction
         else:
-            self._extraction.errors.extend(extraction.errors)
-            self._extraction.warnings.extend(extraction.warnings)
-            self._extraction.modules.extend(extraction.modules)
+            self._extraction = replace(
+                self._extraction,
+                modules=self._extraction.modules + extraction.modules,
+                errors=self._extraction.errors + extraction.errors,
+                warnings=self._extraction.warnings + extraction.warnings,
+            )
 
         impls, import_fails, _skipped = _resolve_implementations(extraction, str(path))
         self._import_failure_count += import_fails
@@ -546,8 +559,6 @@ class SmarterMCP:
                 # schema generation has real type info (not empty list).
                 try:
                     sig = py_inspect.signature(getattr(cls, mname))
-                    from smarter_mcp.extractor.models import ExtractedParam, ParamKind
-                    from smarter_mcp.extractor.surface import _INSPECT_PARAM_KIND_MAP
                     params = []
                     for pname, p in sig.parameters.items():
                         if pname in ("self", "cls"):

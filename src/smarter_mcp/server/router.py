@@ -94,6 +94,35 @@ def _build_tool_description(tool: RegisteredTool | RegisteredResource) -> str:
     return ""
 
 
+def _make_bound_getter(
+    fn: Any,
+    cls_name: str,
+    cls_obj: type,
+    manager: Any,
+    resource_uri: str,
+    log: Any,
+) -> Any:
+    """Return a zero-parameter callable that resolves an instance and calls *fn*.
+
+    Using a factory function (instead of default-value parameters) means the
+    returned ``_bound_getter`` has **no** visible parameters.  FastMCP inspects
+    the signature to decide whether to treat the callable as a static resource
+    or a resource template; default-value params look like MCP parameters and
+    trigger "URI template must contain at least one parameter".
+    """
+    def _bound_getter() -> Any:
+        ctx = None
+        try:
+            from fastmcp.server.dependencies import get_context
+            ctx = get_context()
+        except (ImportError, LookupError, RuntimeError):
+            log.debug("get_context() unavailable for resource %s", resource_uri)
+        instance = manager.get_instance(cls_name, cls_obj, ctx)
+        return fn(instance)
+
+    return _bound_getter
+
+
 class NamespaceRouter:
     """Routes extracted modules to FastMCP sub-servers.
 
@@ -250,7 +279,12 @@ class NamespaceRouter:
             # Derive the module from the qualified name: "mod.Cls.prop" -> "mod"
             qualified = resource.extracted_obj.qualified_name
             qparts = qualified.rsplit(".", 2)
-            module_name = qparts[0] if len(qparts) == 3 else resource.extracted_obj.module_path.replace("/", ".").rstrip(".py")
+            if len(qparts) == 3:
+                module_name = qparts[0]
+            else:
+                module_name = (
+                    resource.extracted_obj.module_path.replace("/", ".").removesuffix(".py")
+                )
 
             try:
                 mod = importlib.import_module(module_name)
@@ -261,24 +295,9 @@ class NamespaceRouter:
                     resource.uri, module_name, class_name, exc,
                 )
             else:
-                orig_fn = impl
-                mgr = self.instance_manager
-
-                def _bound_getter(
-                    _fn=orig_fn,
-                    _cls_name=class_name,
-                    _cls=cls_obj,
-                ) -> Any:
-                    ctx = None
-                    try:
-                        from fastmcp.server.dependencies import get_context
-                        ctx = get_context()
-                    except Exception:  # noqa: BLE001
-                        pass
-                    instance = mgr.get_instance(_cls_name, _cls, ctx)
-                    return _fn(instance)
-
-                impl = _bound_getter
+                impl = _make_bound_getter(
+                    impl, class_name, cls_obj, self.instance_manager, resource.uri, logger
+                )
 
         try:
             server.resource(resource.uri, description=description)(impl)

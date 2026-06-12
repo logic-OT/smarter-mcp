@@ -242,7 +242,7 @@ class ManifestConfig(BaseModel):
     version: str = "0.1.0"
     description: str = ""
 
-    manifest_dir: str | None = None
+    manifest_dir: str | None = Field(default=None, exclude=True)
     """Directory containing the manifest file. Set at load time, not from YAML.
 
     Used to resolve relative source paths against the manifest's own location

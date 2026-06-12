@@ -362,7 +362,7 @@ def init(path: str, output: str | None, force: bool):
             extraction = extractor.extract_file(scan_path)
             from smarter_mcp.extractor.models import ExtractionResult
             result = ExtractionResult(modules=[extraction])
-            impls = _resolve_implementations(result, str(source_root))
+            impls, _failed, _skipped = _resolve_implementations(result, str(source_root))
             rules = _exposure_rules_from_config(app._config)
             filtered = apply_filters(result, rules)
             app._registry.merge_extraction(filtered, impls)

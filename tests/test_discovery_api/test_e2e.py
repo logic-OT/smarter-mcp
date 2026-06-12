@@ -123,12 +123,20 @@ async def test_c4_class_tool_invocable_via_client(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# H13 — property getter runs against a bound instance
+# H13 — property getter runs against an auto-bound instance via _bound_getter
 # ---------------------------------------------------------------------------
 
-def test_h13_property_resource_registered_and_invocable(tmp_path, monkeypatch):
-    """discover() on a class with @property must register it as a resource
-    whose getter can be invoked against a bound instance."""
+@pytest.mark.asyncio
+async def test_h13_property_resource_registered_and_invocable(tmp_path, monkeypatch):
+    """discover() on a class with @property must register it as a resource whose
+    getter is invoked against an auto-bound instance (H13 fix in router.py).
+
+    This test FAILS if the _bound_getter wiring in NamespaceRouter._register_resource
+    is removed: without it the raw fget (which requires 'self') is called with no
+    arguments by FastMCP, raising TypeError.
+    """
+    from fastmcp import Client
+
     mod_name = "h13prop_mod"
     mod_file = tmp_path / f"{mod_name}.py"
     mod_file.write_text(
@@ -137,12 +145,13 @@ def test_h13_property_resource_registered_and_invocable(tmp_path, monkeypatch):
         "    def version(self) -> str:\n"
         "        return '1.0'\n"
     )
-    # Keep tmp_path in sys.path so the module is importable throughout the test
+    # Keep tmp_path in sys.path so the module is importable at build() time
     monkeypatch.syspath_prepend(str(tmp_path))
 
     app = SmarterMCP(name="h13-test", use_inspect=False)
     app.discover(str(tmp_path))
 
+    # Verify registry metadata before building the server
     all_resources = []
     for ns in app._registry.get_all_namespaces():
         all_resources.extend(app._registry.get_namespace_resources(ns))
@@ -163,15 +172,31 @@ def test_h13_property_resource_registered_and_invocable(tmp_path, monkeypatch):
         f"got {version_res.extracted_obj.class_name!r}"
     )
 
-    # Call the fget directly with a bound instance — this is the assertion
-    # that "the property getter runs against a bound instance".
-    import importlib
-    mod = importlib.import_module(mod_name)
-    Config = getattr(mod, "Config")
-    result = version_res.fn(Config())
-    assert result == "1.0", (
-        f"Expected '1.0' from Config().version (property getter); got {result!r}"
-    )
+    # build() wires _bound_getter: it wraps the raw fget so that calling the
+    # resource with no arguments auto-instantiates Config and calls fget(instance).
+    # Without _bound_getter, FastMCP calls fget() with no args → TypeError.
+    server = app.build()
+    async with Client(server) as client:
+        # FastMCP may prefix the URI when mounting the sub-server, so discover
+        # the actual serving URI by listing resources first.
+        registered = await client.list_resources()
+        version_uri = next(
+            (str(r.uri) for r in registered if "version" in str(r.uri)),
+            None,
+        )
+        assert version_uri is not None, (
+            f"Expected a resource URI containing 'version'; got: "
+            f"{[str(r.uri) for r in registered]}"
+        )
+
+        contents = await client.read_resource(version_uri)
+        assert contents, "Expected at least one content item from the resource"
+        text = getattr(contents[0], "text", None) or str(contents[0])
+        assert text == "1.0", (
+            f"Expected '1.0' from Config().version via H13 _bound_getter; "
+            f"got {text!r}. If _bound_getter wiring is removed the raw fget "
+            f"raises TypeError because 'self' is not passed."
+        )
 
 
 # ---------------------------------------------------------------------------

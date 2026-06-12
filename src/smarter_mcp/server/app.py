@@ -306,6 +306,10 @@ class SmarterMCP:
         # SmarterMCP instances in the same process).
         self._registered_decorator_ids: set[int] = set()
 
+        # M4: guard the manifest test-wiring step so a second build() call
+        # does not re-extend tool.tests with duplicate cases.
+        self._tests_wired: bool = False
+
 
 
     def discover(
@@ -538,12 +542,15 @@ class SmarterMCP:
         # ToolOverride.tests defined in YAML need to be merged into the
         # corresponding RegisteredTool.tests so the test runner can find them.
         # O(1) per override via a single name→tool index (built once).
-        if self._config.tools:
+        # Guard with _tests_wired so a second build() call does not append
+        # the same cases again (M4 idempotency fix).
+        if self._config.tools and not self._tests_wired:
             tool_index = self._registry.index_by_name()
             for override in self._config.tools:
                 tool = tool_index.get(override.function)
                 if tool is not None and override.tests:
                     tool.tests.extend(override.tests)
+            self._tests_wired = True
 
         # Step 2.5: LLM-assisted description generation (optional).
         # Fills in missing tool descriptions before the server is built so the

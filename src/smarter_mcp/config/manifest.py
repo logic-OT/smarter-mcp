@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -59,11 +59,14 @@ def _substitute_env_vars(value: Any) -> Any:
 class ServerConfig(BaseModel):
     """Server transport and networking configuration."""
 
+    model_config = ConfigDict(extra="forbid")
+
     host: str = "0.0.0.0"
     port: int = 8000
     transport: Literal["sse", "streamable-http", "stdio"] = "sse"
-    cors_origins: list[str] = Field(default_factory=lambda: ["*"])
     log_level: str = "info"
+    """Python logging level applied at server startup (e.g. 'info', 'debug', 'warning').
+    Wired in SmarterMCP.__init__ via logging.getLogger().setLevel()."""
 
     # Auth
     auth_enabled: bool = False
@@ -79,12 +82,14 @@ class ServerConfig(BaseModel):
 class SourceConfig(BaseModel):
     """Configuration for a source directory or module to scan."""
 
+    model_config = ConfigDict(extra="forbid")
+
     path: str | None = None
     """Path relative to manifest file (or absolute)."""
 
     module: str | None = None
     """Importable module name to scan (e.g., 'random')."""
-    
+
     namespace: str | None = None
     """Custom namespace override."""
 
@@ -92,7 +97,8 @@ class SourceConfig(BaseModel):
     """Glob patterns to exclude from scanning."""
 
     include: list[str] = Field(default_factory=list)
-    """If non-empty, only include files matching these patterns."""
+    """If non-empty, only include files matching these glob patterns (path sources)
+    or callable names (module sources)."""
 
     @model_validator(mode="after")
     def check_path_or_module(self) -> SourceConfig:
@@ -104,11 +110,7 @@ class SourceConfig(BaseModel):
 class RoutingConfig(BaseModel):
     """Namespace routing configuration."""
 
-    base_path: str = "/mcp"
-    """Base URL path for MCP endpoints."""
-
-    root_aggregate: bool = True
-    """Whether the root server aggregates all tools from sub-namespaces."""
+    model_config = ConfigDict(extra="forbid")
 
     overrides: dict[str, str] = Field(default_factory=dict)
     """Module path → custom namespace mapping (e.g., 'db/client' → 'database')."""
@@ -119,6 +121,8 @@ class RoutingConfig(BaseModel):
 
 class ExposeConfig(BaseModel):
     """Controls what gets exposed as MCP tools."""
+
+    model_config = ConfigDict(extra="forbid")
 
     include_private: bool = False
     include_dunder: bool = False
@@ -137,6 +141,8 @@ class InstanceConfig(BaseModel):
     2. Factory function: Call a factory function
     3. Default: Try cls() with no arguments
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     class_name: str
     """Fully qualified class name (e.g., 'mylib.db.Client')."""
@@ -157,6 +163,8 @@ class InstanceConfig(BaseModel):
 class ToolOverride(BaseModel):
     """Per-tool customization."""
 
+    model_config = ConfigDict(extra="forbid")
+
     function: str
     """Qualified function/method name (e.g., 'mylib.db.Client.query')."""
 
@@ -169,9 +177,6 @@ class ToolOverride(BaseModel):
     expose: bool = True
     """Set to false to explicitly exclude this tool."""
 
-    param_descriptions: dict[str, str] = Field(default_factory=dict)
-    """Per-parameter description overrides."""
-
     tests: list[dict[str, Any]] = Field(default_factory=list)
     """List of test cases for this tool."""
 
@@ -179,18 +184,23 @@ class ToolOverride(BaseModel):
 class MultimodalConfig(BaseModel):
     """Multimodal content handling configuration."""
 
-    auto_detect: bool = True
-    """Automatically detect PIL.Image, numpy.ndarray returns."""
+    model_config = ConfigDict(extra="forbid")
 
-    image_format: str = "png"
-    """Default format for encoding images."""
+    auto_detect: bool = True
+    """When True, PIL.Image.Image and numpy.ndarray tool return values are
+    automatically encoded as MCP Image objects. Set to False to disable
+    image coercion entirely (tools must return fastmcp.Image explicitly).
+    Consumed by runtime/tool_wrapper.py — gated per-wrapper at build time."""
 
     image_max_size: tuple[int, int] = (1024, 1024)
-    """Maximum image dimensions (will resize if larger)."""
+    """Maximum image dimensions (width, height) in pixels.
+    Consumed by the image-security interceptor (security hardening PR)."""
 
 
 class LLMConfig(BaseModel):
     """LLM-assisted description generation configuration."""
+
+    model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
     """Enable LLM description generation."""
@@ -237,6 +247,8 @@ class ManifestConfig(BaseModel):
     All fields have sensible defaults — the tool works with
     zero configuration.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str = "my-mcp-server"
     version: str = "0.1.0"

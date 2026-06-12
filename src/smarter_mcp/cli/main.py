@@ -438,9 +438,9 @@ sources:
       - "conftest.py"
 
 # routing:
-#   base_path: "/mcp"
-#   root_aggregate: true
 #   separator: "_"
+#   overrides:
+#     db/client: database
 
 # expose:
 #   include_private: false

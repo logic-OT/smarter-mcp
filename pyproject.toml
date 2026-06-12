@@ -46,7 +46,10 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
 ]
-all = ["smarter-mcp[multimodal,llm,dev]"]
+# e2e: Agno agent-framework + real MCP wire tests (stdio transport).
+# Kept separate from dev so the main suite never needs these heavy deps.
+e2e = ["agno>=1.4", "anthropic>=0.30", "mcp>=1.0"]
+all = ["smarter-mcp[multimodal,llm,dev,e2e]"]
 
 [project.scripts]
 smarter-mcp = "smarter_mcp.cli.main:cli"
@@ -89,3 +92,6 @@ check_untyped_defs = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "e2e: Agno + real MCP wire integration tests (stdio transport)",
+]

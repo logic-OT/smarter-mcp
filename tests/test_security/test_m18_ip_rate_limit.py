@@ -100,3 +100,71 @@ class TestIPRateLimitMiddleware:
         for _ in range(10):
             resp = client.get("/health")
             assert resp.status_code == 200, "Exempt path must bypass IP rate limit"
+
+
+class TestC3IPRateLimitWiredIntoASGI:
+    """C3: IPRateLimitMiddleware must be wired into the ASGI stack (not dead code).
+
+    Previously, build_ip_rate_limit_middleware existed and was unit-tested but
+    _asgi_middleware() never added it to the stack, so it never ran on real
+    http_app() / run() calls.  This end-to-end test verifies that after building
+    a SmarterMCP with rate_limit_enabled=True, the http_app() ASGI stack
+    enforces IP-level 429s.
+    """
+
+    def test_ip_rate_limit_enforced_through_http_app(self):
+        """SmarterMCP.http_app() with rate_limit_enabled must return 429 after the limit."""
+        from starlette.testclient import TestClient
+
+        from smarter_mcp import SmarterMCP
+        from smarter_mcp._decorators import clear_global_registry
+
+        clear_global_registry()
+        try:
+            app = SmarterMCP(
+                "c3-rate-limit-e2e",
+                rate_limit_enabled=True,
+                rate_limit_per_minute=2,  # very low limit for testing
+            )
+            asgi_app = app.http_app()
+            client = TestClient(asgi_app, raise_server_exceptions=False)
+
+            # /mcp/default/schema is not in the default exempt paths, so it is
+            # rate-limited.  It may return 404 (no tools) but must NOT be 429
+            # for the first N requests within the limit.
+            for i in range(2):
+                resp = client.get("/mcp/default/schema")
+                assert resp.status_code != 429, (
+                    f"Request {i + 1} should not be rate-limited yet, "
+                    f"got {resp.status_code}"
+                )
+
+            # The next request must be rate-limited.
+            resp = client.get("/mcp/default/schema")
+            assert resp.status_code == 429, (
+                f"Expected 429 after exceeding IP rate limit, got {resp.status_code}. "
+                "IPRateLimitMiddleware may not be wired into the ASGI stack (C3)."
+            )
+        finally:
+            clear_global_registry()
+
+    def test_ip_rate_limit_not_applied_when_disabled(self):
+        """With rate_limit_enabled=False, no 429 is returned regardless of request count."""
+        from starlette.testclient import TestClient
+
+        from smarter_mcp import SmarterMCP
+        from smarter_mcp._decorators import clear_global_registry
+
+        clear_global_registry()
+        try:
+            app = SmarterMCP("c3-rate-limit-off", rate_limit_enabled=False)
+            asgi_app = app.http_app()
+            client = TestClient(asgi_app, raise_server_exceptions=False)
+
+            for _ in range(10):
+                resp = client.get("/mcp/default/schema")
+                assert resp.status_code != 429, (
+                    "Rate limiting is disabled — no request should return 429"
+                )
+        finally:
+            clear_global_registry()

@@ -965,6 +965,18 @@ class SmarterMCP:
 
         @self._server.custom_route("/mcp/{namespace}/schema", methods=["GET"])
         async def _schema_handler(request: Request) -> JSONResponse:
+            # I1: gate the tool-surface schema behind authentication when auth
+            # is enabled.  Unauthenticated callers could otherwise enumerate
+            # every registered tool even if the raw server property is mounted
+            # separately (e.g. in a larger ASGI composite).
+            if _auth_enabled and not _is_authenticated(request):
+                return JSONResponse(
+                    {
+                        "error": "unauthorized",
+                        "message": f"Missing or invalid {_auth_header}",
+                    },
+                    status_code=401,
+                )
             ns = request.path_params["namespace"]
             compact = request.query_params.get("compact", "false").lower() == "true"
             result = _schema_ep.get_namespace_schema(ns, compact=compact)
@@ -1050,29 +1062,49 @@ class SmarterMCP:
         logger.info(report.summary())
 
     def _asgi_middleware(self) -> list:
-        """Construct ASGI middleware to enforce authentication rules.
-
-        Loads allowed API keys from the configured environment variables and builds
-        the starlette APIKeyMiddleware wrapper.
+        """Construct ASGI middleware to enforce authentication and rate-limiting.
 
         Returns:
-            A list containing Starlette Middleware objects if auth is enabled, or an empty list.
-        """
-        if not self._config.server.auth_enabled:
-            return []
+            A list of Starlette ``Middleware`` objects.  ``IPRateLimitMiddleware``
+            is placed first (outermost) so it throttles even unauthenticated
+            floods before they reach the auth layer.  ``APIKeyMiddleware`` is
+            added only when auth is enabled.
 
+        C3: ``IPRateLimitMiddleware`` is now wired in here (gated on
+        ``rate_limit_enabled``) so it actually runs on ``http_app()`` /
+        ``run()`` — previously it was built but never applied to the ASGI stack.
+        """
         from starlette.middleware import Middleware
 
-        from smarter_mcp.server.security import APIKeyMiddleware, load_api_keys
+        from smarter_mcp.server.security import (
+            APIKeyMiddleware,
+            IPRateLimitMiddleware,
+            load_api_keys,
+        )
 
-        keys = load_api_keys(self._config.server.auth_keys_env)
-        return [
-            Middleware(
-                APIKeyMiddleware,
-                header_name=self._config.server.auth_header,
-                valid_keys=keys,
+        result: list = []
+
+        # C3: IP rate limiting — outermost so it fires before auth.
+        if self._config.server.rate_limit_enabled:
+            result.append(
+                Middleware(
+                    IPRateLimitMiddleware,
+                    max_requests=self._config.server.rate_limit_per_minute,
+                    window_seconds=60,
+                )
             )
-        ]
+
+        if self._config.server.auth_enabled:
+            keys = load_api_keys(self._config.server.auth_keys_env)
+            result.append(
+                Middleware(
+                    APIKeyMiddleware,
+                    header_name=self._config.server.auth_header,
+                    valid_keys=keys,
+                )
+            )
+
+        return result
 
     def http_app(self) -> Any:
         """Construct and return the Starlette ASGI application with configured middlewares.

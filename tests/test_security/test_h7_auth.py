@@ -147,3 +147,49 @@ class TestAPIKeyMiddlewareUsesHmac:
         client = TestClient(app, raise_server_exceptions=True)
         resp = client.get("/test")
         assert resp.status_code == 401
+
+
+class TestI2ConstantWidthComparison:
+    """I2: _constant_time_key_check must hash both operands to fixed width before
+    comparing, preventing length-oracle attacks via hmac.compare_digest's
+    early-out on operands of different lengths.
+    """
+
+    def test_short_provided_key_rejected_not_crashed(self):
+        """A very short provided value must be rejected, not cause an error."""
+        keys = {"a-much-longer-secret-key-value"}
+        # Without hashing, compare_digest would return False immediately on
+        # mismatched lengths.  With hashing both sides are 32 bytes.
+        assert _constant_time_key_check("x", keys) is False
+
+    def test_long_provided_key_rejected(self):
+        """A provided value longer than any valid key must also be safely rejected."""
+        keys = {"short"}
+        assert _constant_time_key_check("x" * 1000, keys) is False
+
+    def test_exact_match_still_accepted_after_hashing(self):
+        """Hashing must not break correct key acceptance."""
+        keys = {"correct-key-abc123"}
+        assert _constant_time_key_check("correct-key-abc123", keys) is True
+
+    def test_all_keys_checked_regardless_of_match(self):
+        """Even after a match, iteration must continue over all keys (no short-circuit)."""
+        import hmac
+
+        matched_calls = []
+
+        original_compare = hmac.compare_digest
+
+        def counting_compare(a, b):
+            matched_calls.append((a, b))
+            return original_compare(a, b)
+
+        with patch("smarter_mcp.server.security.hmac.compare_digest", side_effect=counting_compare):
+            keys = {"key-a", "key-b", "key-c"}
+            result = _constant_time_key_check("key-a", keys)
+
+        assert result is True
+        # Must iterate all 3 keys — no early-out when a match is found.
+        assert len(matched_calls) == len(keys), (
+            f"Expected {len(keys)} comparisons (one per key), got {len(matched_calls)}"
+        )

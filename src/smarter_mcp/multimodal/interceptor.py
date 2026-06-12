@@ -24,6 +24,7 @@ H2/H3/b64decode security hardening:
 from __future__ import annotations
 
 import binascii
+import http.client
 import io
 import ipaddress
 import socket
@@ -99,7 +100,46 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("::1/128"),           # IPv6 loopback
     ipaddress.ip_network("fc00::/7"),          # IPv6 ULA
     ipaddress.ip_network("fe80::/10"),         # IPv6 link-local
+    # C2: IPv4-mapped IPv6 block covers ::ffff:10.x.x.x, ::ffff:127.x.x.x,
+    # ::ffff:169.254.x.x, etc. without requiring per-address unwrapping here.
+    ipaddress.ip_network("::ffff:0:0/96"),
 ]
+
+
+def _is_raw_ip_blocked(ip_str: str) -> bool:
+    """Return True if *ip_str* (a resolved IP address string) is in a blocked range.
+
+    Does NOT perform DNS resolution — *ip_str* must already be a dotted-decimal
+    IPv4 address or colon-hex IPv6 address.
+
+    C2: IPv4-mapped IPv6 addresses (e.g. ``::ffff:169.254.169.254``) are
+    unwrapped and their IPv4 component is also checked against the IPv4 blocked
+    networks, in addition to the ``::ffff:0:0/96`` entry in ``_BLOCKED_NETWORKS``.
+
+    I3: Fails CLOSED — if *ip_str* cannot be parsed, ``CoercionError`` is raised
+    rather than silently allowing the address through.
+    """
+    from smarter_mcp.errors import CoercionError
+
+    try:
+        addr = ipaddress.ip_address(ip_str)
+    except ValueError:
+        # I3: treat unparseable resolved address as blocked (fail closed).
+        raise CoercionError(
+            f"Cannot parse resolved IP address {ip_str!r}: treating as blocked"
+        )
+
+    # C2: unwrap IPv4-mapped IPv6 and check the mapped IPv4 against IPv4 nets.
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        mapped = addr.ipv4_mapped
+        for network in _BLOCKED_NETWORKS:
+            if network.version == 4 and mapped in network:
+                return True
+
+    for network in _BLOCKED_NETWORKS:
+        if addr in network:
+            return True
+    return False
 
 
 def _is_private_ip(host: str) -> bool:
@@ -107,6 +147,10 @@ def _is_private_ip(host: str) -> bool:
 
     Raises ``CoercionError`` on unresolvable hostnames so we always fail
     closed rather than passing through to an unknown destination.
+
+    I3: an address that cannot be parsed by ``ipaddress.ip_address`` is treated
+    as private/blocked (fail closed) rather than silently skipped.
+    C2: IPv4-mapped IPv6 addresses are also checked (see ``_is_raw_ip_blocked``).
     """
     from smarter_mcp.errors import CoercionError
 
@@ -122,12 +166,12 @@ def _is_private_ip(host: str) -> bool:
         sockaddr = info[4]
         raw_ip = sockaddr[0]
         try:
-            addr = ipaddress.ip_address(raw_ip)
-        except ValueError:
-            continue
-        for network in _BLOCKED_NETWORKS:
-            if addr in network:
-                return True
+            blocked = _is_raw_ip_blocked(raw_ip)
+        except CoercionError:
+            # I3: unparseable resolved address → fail closed (treat as private).
+            return True
+        if blocked:
+            return True
     return False
 
 
@@ -150,6 +194,90 @@ def _assert_url_safe(url: str) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Anti-DNS-rebinding: validate peer IP at connect time (C1)
+# ──────────────────────────────────────────────────────────────────────
+
+class _SSRFGuardedHTTPConnection(http.client.HTTPConnection):
+    """HTTP connection that validates the peer IP after the TCP handshake.
+
+    C1 (DNS-rebinding / TOCTOU): ``_assert_url_safe`` checks DNS before
+    ``urlopen``; this class closes the window between that check and the actual
+    TCP connection by reading ``sock.getpeername()`` once the connection is
+    established and rejecting it if the peer IP is in a private/blocked range.
+    The kernel cannot lie about ``getpeername`` — it reflects the TCP state and
+    is immutable for the lifetime of the connection.
+    """
+
+    def connect(self) -> None:  # type: ignore[override]
+        from smarter_mcp.errors import CoercionError
+
+        super().connect()
+        peer_ip = self.sock.getpeername()[0]
+        try:
+            blocked = _is_raw_ip_blocked(peer_ip)
+        except CoercionError:
+            self.sock.close()
+            raise CoercionError(
+                f"SSRF blocked: connected IP {peer_ip!r} could not be validated "
+                "(treated as blocked)"
+            )
+        if blocked:
+            self.sock.close()
+            raise CoercionError(
+                f"SSRF blocked: connected IP {peer_ip!r} is in a private/reserved range"
+            )
+
+
+class _SSRFGuardedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPS connection that validates the peer IP after the TLS handshake.
+
+    See ``_SSRFGuardedHTTPConnection`` — same rationale, same mechanism.
+    ``getpeername()`` on an SSL-wrapped socket returns the TCP-level peer
+    address (which is immutable), so this check is equally reliable.
+    """
+
+    def connect(self) -> None:  # type: ignore[override]
+        from smarter_mcp.errors import CoercionError
+
+        super().connect()
+        peer_ip = self.sock.getpeername()[0]
+        try:
+            blocked = _is_raw_ip_blocked(peer_ip)
+        except CoercionError:
+            self.sock.close()
+            raise CoercionError(
+                f"SSRF blocked: connected IP {peer_ip!r} could not be validated "
+                "(treated as blocked)"
+            )
+        if blocked:
+            self.sock.close()
+            raise CoercionError(
+                f"SSRF blocked: connected IP {peer_ip!r} is in a private/reserved range"
+            )
+
+
+def _make_ssrf_guarded_opener() -> urllib.request.OpenerDirector:
+    """Build a urllib opener using the anti-rebind connection classes.
+
+    C1: The custom handlers pass ``_SSRFGuardedHTTP(S)Connection`` to
+    ``do_open`` so every connection goes through the post-connect peer-IP check.
+    """
+
+    class _GuardedHTTPHandler(urllib.request.HTTPHandler):
+        def http_open(self, req):  # type: ignore[override]
+            return self.do_open(_SSRFGuardedHTTPConnection, req)
+
+    class _GuardedHTTPSHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req):  # type: ignore[override]
+            return self.do_open(_SSRFGuardedHTTPSConnection, req)
+
+    return urllib.request.build_opener(
+        _GuardedHTTPHandler(),
+        _GuardedHTTPSHandler(),
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Blocking fetch helper (called via anyio.to_thread for async callers)
 # ──────────────────────────────────────────────────────────────────────
 
@@ -159,17 +287,23 @@ def _fetch_url_blocking(url: str, timeout: float, max_bytes: int) -> bytes:
     This function is intentionally synchronous so it can be offloaded to a
     thread via ``anyio.to_thread.run_sync`` for async callers (H2 / M2).
 
-    H2: SSRF guard is called before every fetch so redirect chains that land
-    on a private IP are also blocked.
+    H2 / C1: SSRF guard is called before every fetch (pre-validation) AND the
+    connection is made through ``_make_ssrf_guarded_opener()`` which re-checks
+    the peer IP at connect time via ``sock.getpeername()``. This two-layer check
+    defeats DNS-rebinding attacks where the attacker's TTL-0 record resolves to
+    a public IP during validation but a private IP during the actual connection.
     """
     from smarter_mcp.errors import CoercionError
 
-    # Validate before opening — catches the common case without a roundtrip.
+    # Pre-validation: catches the common case and avoids connecting at all.
     _assert_url_safe(url)
 
+    # C1: Use the guarded opener so the peer IP is validated at connect time,
+    # not just at pre-validation time (defeats DNS rebinding).
+    opener = _make_ssrf_guarded_opener()
     req = urllib.request.Request(url, headers={"User-Agent": "smarter-mcp/image-fetch"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with opener.open(req, timeout=timeout) as resp:
             # Re-validate after potential redirect.
             final_url = resp.url or url
             final_parsed = urllib.parse.urlparse(final_url)
@@ -179,7 +313,8 @@ def _fetch_url_blocking(url: str, timeout: float, max_bytes: int) -> bytes:
 
             # H3: respect Content-Length but never trust it — cap unconditionally.
             content_length = int(resp.headers.get("Content-Length", 0) or 0)
-            if 0 < content_length > max_bytes:
+            # M4: rewrite the chained comparison to unambiguous form.
+            if content_length > 0 and content_length > max_bytes:
                 raise CoercionError(
                     f"Image URL response too large: Content-Length {content_length} "
                     f"exceeds limit {max_bytes}"

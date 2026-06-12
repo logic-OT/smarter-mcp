@@ -144,3 +144,125 @@ class TestA1ExposeFilter:
                 )
         finally:
             clear_global_registry()
+
+
+class TestI1SchemaEndpointAuth:
+    """I1: /mcp/{namespace}/schema must require auth when auth_enabled=True.
+
+    The inline auth check in _schema_handler ensures that even if someone
+    bypasses APIKeyMiddleware (e.g. mounts the raw server property), they
+    cannot enumerate the tool surface without a valid key.
+    """
+
+    def _build_auth_app(self, key: str):
+        """Build a SmarterMCP with auth enabled and return the raw FastMCP http_app
+        (no APIKeyMiddleware in the stack) so we test the inline check directly.
+        """
+        import os
+        from unittest.mock import patch
+
+        from smarter_mcp import SmarterMCP
+        from smarter_mcp._decorators import clear_global_registry
+
+        clear_global_registry()
+        env_var = "TEST_SCHEMA_AUTH_KEYS"
+        with patch.dict(os.environ, {env_var: key}):
+            app = SmarterMCP(
+                "test-schema-auth",
+                auth_enabled=True,
+                auth_keys_env=env_var,
+            )
+            # build() registers the custom routes including _schema_handler
+            app.build()
+        # Return the raw FastMCP http_app WITHOUT our APIKeyMiddleware so that
+        # only the inline check in _schema_handler is exercised.
+        return app._server.http_app(), key
+
+    def test_schema_without_key_returns_401_when_auth_enabled(self):
+        """No key provided → 401 from the inline auth check in _schema_handler."""
+        import os
+        from unittest.mock import patch
+
+        from starlette.testclient import TestClient
+
+        from smarter_mcp import SmarterMCP
+        from smarter_mcp._decorators import clear_global_registry
+
+        clear_global_registry()
+        try:
+            env_var = "TEST_SCHEMA_NO_KEY"
+            key = "supersecret-schema-key"
+            with patch.dict(os.environ, {env_var: key}):
+                app = SmarterMCP(
+                    "test-schema-nokey",
+                    auth_enabled=True,
+                    auth_keys_env=env_var,
+                )
+                app.build()
+
+            # Raw FastMCP http_app — no APIKeyMiddleware wrapping it.
+            raw_asgi = app._server.http_app()
+            client = TestClient(raw_asgi, raise_server_exceptions=False)
+            resp = client.get("/mcp/default/schema")
+            assert resp.status_code == 401, (
+                f"Expected 401 for unauthenticated /schema request, got {resp.status_code}"
+            )
+        finally:
+            clear_global_registry()
+
+    def test_schema_with_valid_key_is_not_401_when_auth_enabled(self):
+        """Valid key provided → not 401 (may be 404 for unknown namespace)."""
+        import os
+        from unittest.mock import patch
+
+        from starlette.testclient import TestClient
+
+        from smarter_mcp import SmarterMCP
+        from smarter_mcp._decorators import clear_global_registry
+
+        clear_global_registry()
+        try:
+            env_var = "TEST_SCHEMA_WITH_KEY"
+            key = "valid-schema-key-xyz"
+            # Keep patch.dict active for the full request so _is_authenticated
+            # can load the key when the handler calls load_api_keys() at request time.
+            with patch.dict(os.environ, {env_var: key}):
+                app = SmarterMCP(
+                    "test-schema-withkey",
+                    auth_enabled=True,
+                    auth_keys_env=env_var,
+                )
+                app.build()
+
+                raw_asgi = app._server.http_app()
+                client = TestClient(raw_asgi, raise_server_exceptions=False)
+                resp = client.get(
+                    "/mcp/default/schema",
+                    headers={"X-API-Key": key},
+                )
+            assert resp.status_code != 401, (
+                f"Valid key should not return 401, got {resp.status_code}"
+            )
+        finally:
+            clear_global_registry()
+
+    def test_schema_auth_disabled_is_accessible_without_key(self):
+        """When auth_enabled=False, /schema must be accessible without a key."""
+        from starlette.testclient import TestClient
+
+        from smarter_mcp import SmarterMCP
+        from smarter_mcp._decorators import clear_global_registry
+
+        clear_global_registry()
+        try:
+            app = SmarterMCP("test-schema-noauth", auth_enabled=False)
+            app.build()
+
+            raw_asgi = app._server.http_app()
+            client = TestClient(raw_asgi, raise_server_exceptions=False)
+            resp = client.get("/mcp/default/schema")
+            assert resp.status_code != 401, (
+                f"auth_enabled=False must allow unauthenticated /schema, got {resp.status_code}"
+            )
+        finally:
+            clear_global_registry()

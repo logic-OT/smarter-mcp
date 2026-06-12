@@ -28,6 +28,7 @@ M18 security note:
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 import os
@@ -60,18 +61,32 @@ def load_api_keys(env_var: str) -> set[str]:
 
 def _constant_time_key_check(provided: str, valid_keys: set[str]) -> bool:
     """Compare ``provided`` against every key in ``valid_keys`` using
-    ``hmac.compare_digest``.
+    ``hmac.compare_digest`` on SHA-256 digests.
+
+    I2: Both operands are hashed to a fixed-width SHA-256 digest before
+    comparison.  ``hmac.compare_digest`` returns early when its two arguments
+    have different lengths; hashing eliminates that length-oracle leak so
+    comparison time is always constant regardless of how long (or short) the
+    provided value is.
 
     All comparisons are executed regardless of intermediate results (no
     early-out) to prevent timing-oracle attacks that could enumerate valid keys
     character-by-character.
 
+    M1 note: the ``if not provided`` early-exit in ``APIKeyMiddleware.dispatch``
+    runs BEFORE this function is called, so an empty string is rejected without
+    entering the constant-time path.  That short-circuit is safe: an attacker
+    who knows the empty-string response is fast gains only the trivial fact that
+    "" is not a valid key, which is always true — it does not narrow the search
+    space for real keys.
+
     Returns True iff ``provided`` exactly matches at least one key.
     """
+    provided_digest = hashlib.sha256(provided.encode()).digest()
     matched = False
     for key in valid_keys:
-        # compare_digest requires both operands to be the same type.
-        if hmac.compare_digest(provided.encode(), key.encode()):
+        key_digest = hashlib.sha256(key.encode()).digest()
+        if hmac.compare_digest(provided_digest, key_digest):
             matched = True
         # Do NOT break — always iterate all keys (timing safety).
     return matched
@@ -227,7 +242,14 @@ class SlidingWindowMiddleware(Middleware):
             else window_seconds * 2
         )
         self._buckets: dict[str, _SlidingWindow] = {}
-        self._lock = anyio.Lock()
+        # M3: lazy-init so the Lock is created inside an active event loop,
+        # matching the pattern already used by IPRateLimitMiddleware.
+        self._lock: anyio.Lock | None = None
+
+    def _get_lock(self) -> anyio.Lock:
+        if self._lock is None:
+            self._lock = anyio.Lock()
+        return self._lock
 
     def _client_id(self, context: MiddlewareContext) -> str:
         if self.get_client_id is not None:
@@ -245,7 +267,7 @@ class SlidingWindowMiddleware(Middleware):
         from mcp.types import ErrorData
 
         client_id = self._client_id(context)
-        async with self._lock:
+        async with self._get_lock():
             self._evict_stale(time.monotonic())
             bucket = self._buckets.get(client_id)
             if bucket is None:
@@ -309,6 +331,11 @@ class IPRateLimitMiddleware(BaseHTTPMiddleware):
         client = request.scope.get("client")
         if client and isinstance(client, (tuple, list)) and len(client) >= 1:
             return str(client[0])
+        # M5: scope["client"] is None for UNIX-socket or in-process transports
+        # (e.g. Starlette TestClient with no client set).  All such requests
+        # share the "unknown" bucket, so in-process callers collectively consume
+        # from one window — acceptable since this path is not reachable from
+        # an external network interface.
         return "unknown"
 
     def _evict_stale(self, now: float) -> None:

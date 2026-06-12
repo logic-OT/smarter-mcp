@@ -71,6 +71,12 @@ _EXCLUDED_DIR_NAMES = frozenset({
 # whole tree (often a checkout root) is being walked.
 _SCAN_FILE_WARN_THRESHOLD = 500
 
+# Files larger than this are skipped with a WARNING.
+# Pathologically large files can cause slow parses or RecursionError in
+# ast.parse; that error currently lands in the silently-discarded warnings
+# list, so we guard before attempting the read.
+_MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB
+
 
 def _is_pruned_dir(name: str) -> bool:
     """Whether a directory should be skipped during discovery.
@@ -331,16 +337,43 @@ def _extract_module_ast(
     functions: list[ExtractedCallable] = []
     classes: list[ExtractedClass] = []
 
-    # Check for __all__
+    # Check for __all__ at MODULE level only (tree.body = top-level statements).
+    # Also handles the annotated form ``__all__: list[str] = [...]`` (AnnAssign)
+    # and warns when __all__ cannot be statically evaluated.
     all_exports = None
-    for node in ast.walk(tree):
+    for node in tree.body:
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == "__all__":
                     try:
                         all_exports = ast.literal_eval(node.value)
                     except (ValueError, TypeError):
-                        pass
+                        logger.warning(
+                            "Module '%s': __all__ is dynamic or unparseable — "
+                            "respect_all filtering disabled for this module.",
+                            module_path,
+                        )
+        elif isinstance(node, ast.AnnAssign):
+            if (
+                isinstance(node.target, ast.Name)
+                and node.target.id == "__all__"
+                and node.value is not None
+            ):
+                try:
+                    all_exports = ast.literal_eval(node.value)
+                except (ValueError, TypeError):
+                    logger.warning(
+                        "Module '%s': __all__ is dynamic or unparseable — "
+                        "respect_all filtering disabled for this module.",
+                        module_path,
+                    )
+        elif isinstance(node, ast.AugAssign):
+            if isinstance(node.target, ast.Name) and node.target.id == "__all__":
+                logger.warning(
+                    "Module '%s': __all__ uses augmented assignment (+=) — "
+                    "respect_all filtering disabled for this module.",
+                    module_path,
+                )
 
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -778,6 +811,19 @@ class SurfaceExtractor:
 
     def _extract_file(self, file_path: Path) -> ExtractedModule:
         """Extract a single file through both passes (cached by content hash)."""
+        file_size = file_path.stat().st_size
+        if file_size > _MAX_FILE_BYTES:
+            logger.warning(
+                "Skipping %s: file size %d bytes exceeds the %d-byte limit "
+                "(set _MAX_FILE_BYTES to adjust).",
+                file_path,
+                file_size,
+                _MAX_FILE_BYTES,
+            )
+            return ExtractedModule(
+                module_path=str(file_path.relative_to(self.source_root)),
+                module_name=self._file_to_module_name(file_path),
+            )
         source = file_path.read_text(encoding="utf-8")
         relative_path = str(file_path.relative_to(self.source_root))
         module_name = self._file_to_module_name(file_path)

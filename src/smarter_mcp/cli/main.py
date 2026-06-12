@@ -317,8 +317,14 @@ def init(path: str, output: str | None, force: bool):
     # it) and fall back to scanning the cwd. This preserves the original
     # `smarter-mcp init ./new-project` workflow where the dir is scaffolded fresh.
     if not given_path.exists():
+        if output:
+            raise click.ClickException(
+                f"Source path does not exist: {given_path}. "
+                "Omit --output to scaffold a new project directory at that path, "
+                "or point PATH to an existing directory to scan."
+            )
         output_dir = given_path
-        scan_path = Path(output).resolve() if output else Path.cwd()
+        scan_path = Path.cwd()
     else:
         scan_path = given_path
         output_dir = Path(output).resolve() if output else Path.cwd()

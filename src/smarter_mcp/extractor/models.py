@@ -131,8 +131,24 @@ class ExtractedCallable:
 
     @property
     def non_self_params(self) -> list[ExtractedParam]:
-        """Parameters excluding 'self' and 'cls'."""
-        return [p for p in self.parameters if p.name not in ("self", "cls")]
+        """Parameters excluding the implicit instance/class receiver.
+
+        Only the first positional parameter of METHOD, CLASSMETHOD, and PROPERTY
+        callables is stripped — and only when its name is the conventional
+        ``self`` or ``cls``.  Free functions (FUNCTION) and static methods
+        (STATICMETHOD) are returned unmodified, even if a parameter happens to be
+        named ``self`` or ``cls``.
+        """
+        if self.kind in (CallableKind.METHOD, CallableKind.PROPERTY):
+            if self.parameters and self.parameters[0].name == "self":
+                return self.parameters[1:]
+            return list(self.parameters)
+        if self.kind == CallableKind.CLASSMETHOD:
+            if self.parameters and self.parameters[0].name == "cls":
+                return self.parameters[1:]
+            return list(self.parameters)
+        # FUNCTION, STATICMETHOD — no implicit receiver
+        return list(self.parameters)
 
     @property
     def non_variadic_params(self) -> list[ExtractedParam]:

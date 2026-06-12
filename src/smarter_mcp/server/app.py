@@ -397,11 +397,11 @@ class SmarterMCP:
         # Apply overrides — server
         # C3: name is the first positional parameter (matching FastMCP convention),
         # so SmarterMCP("my-server") correctly sets the server name.
-        if name:
+        if name is not None:
             self._config.name = name
-        if port:
+        if port is not None:
             self._config.server.port = port
-        if host:
+        if host is not None:
             self._config.server.host = host
         if transport:
             self._config.server.transport = transport

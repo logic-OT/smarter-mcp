@@ -13,6 +13,7 @@ not guarantees. The schema generator marks them as "inferred".
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
 from typing import Any
 
 from .models import _MISSING_TYPE, _NON_LITERAL_TYPE
@@ -107,6 +108,18 @@ def _find_function_node(
     return None
 
 
+def _iter_own_body(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast.AST]:
+    """Walk func_node's own body, skipping nested function/class/lambda bodies."""
+    worklist: list[ast.AST] = list(func_node.body)
+    while worklist:
+        node = worklist.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            # Do not recurse into nested callable bodies
+            continue
+        worklist.extend(ast.iter_child_nodes(node))
+
+
 def infer_return_type(
     tree: ast.Module,
     func_name: str,
@@ -134,7 +147,7 @@ def infer_return_type(
 
     return_types: set[str] = set()
 
-    for node in ast.walk(func_node):
+    for node in _iter_own_body(func_node):
         if isinstance(node, ast.Return) and node.value is not None:
             ret_type = _get_return_type_from_node(node.value)
             if ret_type:

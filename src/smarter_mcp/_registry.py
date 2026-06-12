@@ -137,7 +137,15 @@ class ToolRegistry:
             lifecycle=lifecycle,
             constructor_args=constructor_args or {}
         )
-        self._toolkits[cls.__name__] = tk
+        _toolkit_key = f"{cls.__module__}.{cls.__qualname__}"
+        existing = self._toolkits.get(_toolkit_key)
+        if existing is not None and existing.cls is not cls:
+            logger.warning(
+                "Toolkit collision: '%s' is already registered. "
+                "The new registration will overwrite it.",
+                _toolkit_key,
+            )
+        self._toolkits[_toolkit_key] = tk
         return tk
 
     def merge_extraction(

@@ -11,16 +11,17 @@ collision-free tool naming:
 
 from __future__ import annotations
 
-import asyncio
 import importlib
-import inspect
 import logging
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
 
-from smarter_mcp.config.manifest import ManifestConfig, RoutingConfig, ToolOverride
-from smarter_mcp._registry import ToolRegistry, RegisteredTool, RegisteredResource
+from smarter_mcp._registry import RegisteredResource, RegisteredTool, ToolRegistry
+from smarter_mcp.config.manifest import ManifestConfig, ToolOverride
+
+if TYPE_CHECKING:
+    from smarter_mcp.runtime.instances import InstanceManager
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ def _build_tool_description(tool: RegisteredTool | RegisteredResource) -> str:
         return f"{tool.name}()"
     elif isinstance(tool, RegisteredResource):
         return f"Resource: {tool.uri}"
-    
+
     return ""
 
 
@@ -134,7 +135,7 @@ class NamespaceRouter:
     def __init__(
         self,
         config: ManifestConfig,
-        instance_manager: "InstanceManager" | None = None,
+        instance_manager: InstanceManager | None = None,
     ):
         """
         Args:
@@ -236,7 +237,7 @@ class NamespaceRouter:
                 description = override.description
 
         impl = tool.fn
-        
+
         from smarter_mcp.runtime.tool_wrapper import build_tool_wrapper
         impl = build_tool_wrapper(tool, impl, self.instance_manager)
 

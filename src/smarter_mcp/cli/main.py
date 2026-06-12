@@ -425,7 +425,7 @@ version: "0.1.0"
 description: "MCP Server generated from {server_name}"
 
 server:
-  host: "0.0.0.0"
+  host: "127.0.0.1"
   port: 8000
   transport: "sse" # Options: sse, streamable-http, stdio
   log_level: "info"

@@ -15,13 +15,14 @@ import logging
 from typing import Any, Callable
 
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 
 from smarter_mcp._registry import RegisteredTool
 from smarter_mcp.errors import CoercionError, ToolExecutionError, format_error_response
 from smarter_mcp.extractor.models import CallableKind
+from smarter_mcp.multimodal.interceptor import coerce_to_fastmcp_image
 from smarter_mcp.runtime.coercion import coerce_arguments
 from smarter_mcp.runtime.instances import InstanceManager
-from smarter_mcp.multimodal.interceptor import coerce_to_fastmcp_image
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ def build_tool_wrapper(
     instance_manager: InstanceManager | None = None,
     *,
     auto_detect: bool = True,
+    include_traceback: bool = False,
 ) -> Callable:
     """Build a FastMCP-compatible wrapper for a callable.
 
@@ -66,18 +68,28 @@ def build_tool_wrapper(
 
     if not is_method or kind == CallableKind.STATICMETHOD:
         # Free functions and static methods: no instance injection.
-        wrapper = _build_function_wrapper(tool, impl, is_async, auto_detect=auto_detect)
+        wrapper = _build_function_wrapper(
+            tool, impl, is_async,
+            auto_detect=auto_detect,
+            include_traceback=include_traceback,
+        )
     elif kind == CallableKind.CLASSMETHOD:
         # Classmethods: the impl retrieved via getattr(cls, name) is already
         # bound to the class (Python's descriptor protocol provides cls
         # automatically).  Treat like a plain function — no instance injection.
-        wrapper = _build_function_wrapper(tool, impl, is_async, auto_detect=auto_detect)
+        wrapper = _build_function_wrapper(
+            tool, impl, is_async,
+            auto_detect=auto_detect,
+            include_traceback=include_traceback,
+        )
     else:
         # Regular instance method: needs an instance from the manager.
         if not instance_manager:
             raise ValueError("instance_manager is required for wrapping methods")
         wrapper = _build_method_wrapper(
-            tool, impl, instance_manager, is_async, auto_detect=auto_detect
+            tool, impl, instance_manager, is_async,
+            auto_detect=auto_detect,
+            include_traceback=include_traceback,
         )
 
     # Forge the FastMCP-visible signature from the impl's parameters.
@@ -195,6 +207,7 @@ def _build_function_wrapper(
     is_async: bool,
     *,
     auto_detect: bool = True,
+    include_traceback: bool = False,
 ) -> Callable:
     """Wrap a module-level function, static method, or (bound) class method."""
 
@@ -216,13 +229,21 @@ def _build_function_wrapper(
                     res = await impl(**coerced_kwargs)
                 return coerce_to_fastmcp_image(res) if auto_detect else res
             except CoercionError as e:
-                logger.warning("Coercion error in tool '%s': %s", tool.name, e)
-                return format_error_response(tool.name, e)
-            except Exception as e:
-                logger.error(
-                    "Execution error in tool '%s': %s", tool.name, e, exc_info=True
+                # H4: raise ToolError so FastMCP sets isError; traceback logged
+                # inside format_error_response, not sent to caller.
+                msg = format_error_response(
+                    tool.name, e, include_traceback=include_traceback
                 )
-                return format_error_response(tool.name, ToolExecutionError(str(e)))
+                raise ToolError(msg) from None
+            except ToolError:
+                raise
+            except Exception as e:
+                msg = format_error_response(
+                    tool.name,
+                    ToolExecutionError(str(e)),
+                    include_traceback=include_traceback,
+                )
+                raise ToolError(msg) from None
         return _async_wrapper
     else:
         @functools.wraps(impl)
@@ -236,13 +257,19 @@ def _build_function_wrapper(
                     res = impl(**coerced_kwargs)
                 return coerce_to_fastmcp_image(res) if auto_detect else res
             except CoercionError as e:
-                logger.warning("Coercion error in tool '%s': %s", tool.name, e)
-                return format_error_response(tool.name, e)
-            except Exception as e:
-                logger.error(
-                    "Execution error in tool '%s': %s", tool.name, e, exc_info=True
+                msg = format_error_response(
+                    tool.name, e, include_traceback=include_traceback
                 )
-                return format_error_response(tool.name, ToolExecutionError(str(e)))
+                raise ToolError(msg) from None
+            except ToolError:
+                raise
+            except Exception as e:
+                msg = format_error_response(
+                    tool.name,
+                    ToolExecutionError(str(e)),
+                    include_traceback=include_traceback,
+                )
+                raise ToolError(msg) from None
         return _sync_wrapper
 
 
@@ -253,6 +280,7 @@ def _build_method_wrapper(
     is_async: bool,
     *,
     auto_detect: bool = True,
+    include_traceback: bool = False,
 ) -> Callable:
     """Wrap a regular instance method."""
 
@@ -291,13 +319,19 @@ def _build_method_wrapper(
                     res = await impl(instance, **coerced_kwargs)
                 return coerce_to_fastmcp_image(res) if auto_detect else res
             except CoercionError as e:
-                logger.warning("Coercion error in tool '%s': %s", tool.name, e)
-                return format_error_response(tool.name, e)
-            except Exception as e:
-                logger.error(
-                    "Execution error in tool '%s': %s", tool.name, e, exc_info=True
+                msg = format_error_response(
+                    tool.name, e, include_traceback=include_traceback
                 )
-                return format_error_response(tool.name, ToolExecutionError(str(e)))
+                raise ToolError(msg) from None
+            except ToolError:
+                raise
+            except Exception as e:
+                msg = format_error_response(
+                    tool.name,
+                    ToolExecutionError(str(e)),
+                    include_traceback=include_traceback,
+                )
+                raise ToolError(msg) from None
         return _async_method_wrapper
     else:
         @functools.wraps(impl)
@@ -312,11 +346,17 @@ def _build_method_wrapper(
                     res = impl(instance, **coerced_kwargs)
                 return coerce_to_fastmcp_image(res) if auto_detect else res
             except CoercionError as e:
-                logger.warning("Coercion error in tool '%s': %s", tool.name, e)
-                return format_error_response(tool.name, e)
-            except Exception as e:
-                logger.error(
-                    "Execution error in tool '%s': %s", tool.name, e, exc_info=True
+                msg = format_error_response(
+                    tool.name, e, include_traceback=include_traceback
                 )
-                return format_error_response(tool.name, ToolExecutionError(str(e)))
+                raise ToolError(msg) from None
+            except ToolError:
+                raise
+            except Exception as e:
+                msg = format_error_response(
+                    tool.name,
+                    ToolExecutionError(str(e)),
+                    include_traceback=include_traceback,
+                )
+                raise ToolError(msg) from None
         return _sync_method_wrapper

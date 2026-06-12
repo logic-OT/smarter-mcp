@@ -249,6 +249,7 @@ class NamespaceRouter:
             impl,
             self.instance_manager,
             auto_detect=self.config.multimodal.auto_detect,
+            include_traceback=self.config.multimodal.debug_include_traceback,
         )
 
         # Register with FastMCP

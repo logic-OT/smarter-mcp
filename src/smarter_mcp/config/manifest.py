@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class ServerConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8000
     transport: Literal["sse", "streamable-http", "stdio"] = "sse"
     log_level: str = "info"
@@ -195,6 +195,27 @@ class MultimodalConfig(BaseModel):
     image_max_size: tuple[int, int] = (1024, 1024)
     """Maximum image dimensions (width, height) in pixels.
     Consumed by the image-security interceptor (security hardening PR)."""
+
+    allow_url_fetch: bool = False
+    """When True, image parameters accept HTTP/HTTPS URLs and will fetch them.
+    Default False to prevent SSRF attacks — must be explicitly opted in.
+    When enabled, private/loopback/link-local IP ranges are always blocked."""
+
+    allow_local_file: bool = False
+    """When True, image parameters accept local filesystem paths.
+    Default False to prevent arbitrary file disclosure — must be explicitly
+    opted in. Treat as a trust boundary: only enable for trusted callers."""
+
+    url_fetch_timeout: float = 10.0
+    """Timeout in seconds for URL image fetches (when allow_url_fetch=True)."""
+
+    url_max_bytes: int = 10 * 1024 * 1024  # 10 MB
+    """Maximum number of bytes to read from a URL or base64 payload."""
+
+    debug_include_traceback: bool = False
+    """When True, error responses include the full server-side traceback.
+    Default False to avoid leaking file paths/secrets to clients.
+    Enable only in development environments."""
 
 
 class LLMConfig(BaseModel):

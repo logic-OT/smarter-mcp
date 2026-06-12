@@ -48,6 +48,28 @@ from smarter_mcp._testing import ToolTestRunner, TestReport
 
 logger = logging.getLogger(__name__)
 
+# Loopback addresses — binding to anything else without auth is dangerous.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _warn_insecure_bind(server_config: Any) -> None:
+    """H1: emit a loud WARNING when the server is bound to a non-loopback
+    address with authentication disabled.
+
+    This does NOT prevent startup — operators may have valid reasons (e.g.
+    a private LAN with no public exposure) — but the warning is hard to miss.
+    """
+    host = getattr(server_config, "host", "127.0.0.1")
+    auth_enabled = getattr(server_config, "auth_enabled", False)
+    if host not in _LOOPBACK_HOSTS and not auth_enabled:
+        logger.warning(
+            "SECURITY WARNING: Server is binding to %s with auth_enabled=False. "
+            "All tools are accessible to anyone on the network without authentication. "
+            "Set auth_enabled=True and configure %s, or bind to 127.0.0.1.",
+            host,
+            getattr(server_config, "auth_keys_env", "SMARTER_MCP_API_KEYS"),
+        )
+
 
 def _fix_package_module_names(
     extraction: ExtractionResult,
@@ -883,9 +905,14 @@ class SmarterMCP:
 
         # Step 3: Build router + server
         from smarter_mcp.server.security import (
+            assert_auth_keys_present,
             build_auth_provider,
             build_rate_limit_middleware,
         )
+
+        # H7 / A2: fail-closed guard — fires regardless of which public
+        # entrypoint (build/http_app/run) is used.
+        assert_auth_keys_present(self._config.server)
 
         self._router = NamespaceRouter(
             config=self._config,
@@ -903,6 +930,7 @@ class SmarterMCP:
         from starlette.responses import JSONResponse
         from smarter_mcp.server.health import HealthEndpoint
         from smarter_mcp.server.schema_endpoint import SchemaEndpoint
+        from smarter_mcp.server.security import load_api_keys, _constant_time_key_check
 
         _health_ep = HealthEndpoint(
             self._router,
@@ -910,17 +938,40 @@ class SmarterMCP:
             extraction_result=self._extraction,
             import_failure_count=self._import_failure_count,
         )
-        _schema_ep = SchemaEndpoint(self._registry)
+        # A1: SchemaEndpoint gets the ROUTER so it builds from the registered
+        # tool surface (respects expose=False, name overrides, etc.).
+        _schema_ep = SchemaEndpoint(self._registry, router=self._router)
+
+        _auth_enabled = self._config.server.auth_enabled
+        _auth_header = self._config.server.auth_header
+        _auth_keys_env = self._config.server.auth_keys_env
+
+        def _is_authenticated(request: Request) -> bool:
+            """Return True if the request carries a valid API key."""
+            if not _auth_enabled:
+                return False
+            keys = load_api_keys(_auth_keys_env)
+            provided = request.headers.get(_auth_header, "")
+            return bool(provided) and _constant_time_key_check(provided, keys)
 
         @self._server.custom_route("/health", methods=["GET"])
         async def _health_handler(request: Request) -> JSONResponse:
-            return JSONResponse(_health_ep.get_health())
+            # H8: unauthenticated callers get only the bare status; full
+            # detail (namespaces, counts, version) requires a valid API key.
+            return JSONResponse(
+                _health_ep.get_health(authenticated=_is_authenticated(request))
+            )
 
         @self._server.custom_route("/mcp/{namespace}/schema", methods=["GET"])
         async def _schema_handler(request: Request) -> JSONResponse:
             ns = request.path_params["namespace"]
             compact = request.query_params.get("compact", "false").lower() == "true"
-            return JSONResponse(_schema_ep.get_namespace_schema(ns, compact=compact))
+            result = _schema_ep.get_namespace_schema(ns, compact=compact)
+            # H8 / A1: if the namespace was not found, return 404 (not 200
+            # with an error key, which agents can't distinguish from success).
+            if "error" in result:
+                return JSONResponse(result, status_code=404)
+            return JSONResponse(result)
 
         logger.info(
             "Server '%s' ready: %d namespaces, %s transport",
@@ -1033,6 +1084,7 @@ class SmarterMCP:
         """
         if self._server is None:
             self.build()
+        _warn_insecure_bind(self._config.server)
         return self._server.http_app(middleware=self._asgi_middleware())
 
     def run(self) -> None:
@@ -1053,6 +1105,7 @@ class SmarterMCP:
         if transport == "stdio":
             self._server.run(transport="stdio")
         elif transport == "sse":
+            _warn_insecure_bind(self._config.server)
             self._server.run(
                 transport="sse",
                 host=self._config.server.host,
@@ -1060,6 +1113,7 @@ class SmarterMCP:
                 middleware=self._asgi_middleware(),
             )
         elif transport == "streamable-http":
+            _warn_insecure_bind(self._config.server)
             self._server.run(
                 transport="streamable-http",
                 host=self._config.server.host,

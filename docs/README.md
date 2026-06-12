@@ -330,7 +330,6 @@ tools:
 # Multimodal settings
 multimodal:
   auto_detect: true
-  image_format: png
 
 # LLM-assisted description generation (off by default)
 llm:

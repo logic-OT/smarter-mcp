@@ -115,9 +115,18 @@ class TestAutoDetectWiring:
         sig = inspect.signature(wrapper)
         assert "x" in sig.parameters
 
-    def test_router_passes_auto_detect_false_to_wrapper(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_router_passes_auto_detect_false_to_wrapper(self, tmp_path):
         """NamespaceRouter must read multimodal.auto_detect from manifest and
-        pass it to build_tool_wrapper so string returns are not coerced."""
+        pass it to build_tool_wrapper so string returns are not coerced.
+
+        Calls the tool through the real in-memory FastMCP Client to prove
+        auto_detect=False is wired end-to-end (not just unit-tested at the
+        wrapper level).  With auto_detect=True, "Hello, Alice!" would be
+        treated as an image path and raise an error.
+        """
+        from fastmcp import Client
+
         from smarter_mcp import tool
         from smarter_mcp.server.app import SmarterMCP
 
@@ -132,10 +141,21 @@ class TestAutoDetectWiring:
             "  auto_detect: false\n"
         )
         app = SmarterMCP(manifest=str(mf))
-        app.build()
-        # If auto_detect=False is not wired, greet("Alice") would try to open
-        # "Hello, Alice!" as an image file and fail.  We just verify build() works.
-        assert app._server is not None
+        server = app.build()
+
+        async with Client(server) as client:
+            res = await client.call_tool("greet", {"name": "Alice"})
+            # Extract the text value from the CallToolResult
+            if hasattr(res, "content") and res.content:
+                value = getattr(res.content[0], "text", None) or str(res.content[0])
+            elif hasattr(res, "data") and res.data is not None:
+                value = str(res.data)
+            else:
+                value = str(res)
+            assert value == "Hello, Alice!", (
+                f"Expected 'Hello, Alice!', got {value!r}. "
+                "auto_detect=False must not coerce plain string returns to images."
+            )
 
 
 # ---------------------------------------------------------------------------

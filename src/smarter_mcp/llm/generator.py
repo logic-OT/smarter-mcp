@@ -33,8 +33,10 @@ _SYSTEM_PROMPT = (
 # Maximum length (chars) for a cached description.
 _MAX_DESC_LEN = 500
 
-# Regex to strip markdown code fences (``` ... ```) from LLM output.
+# Regex to strip paired markdown code fences (``` ... ```) from LLM output.
 _FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+# Fallback: strip any remaining unterminated opening fence (e.g. ```python with no closing ```).
+_UNTERMINATED_FENCE_RE = re.compile(r"```.*$", re.DOTALL)
 
 # Error class names that indicate ALL future LLM calls will also fail.
 # Using class name strings avoids a hard dependency on the openai package.
@@ -51,7 +53,10 @@ def _sanitize_description(text: str) -> str:
     instructions. We strip them and cap the length to prevent unbounded cache
     growth and to ensure descriptions fit in tool schemas.
     """
+    # Strip paired fences (e.g. ```python\ncode\n```).
     text = _FENCE_RE.sub("", text).strip()
+    # Strip any remaining unterminated opening fence (e.g. ```python with no closing ```).
+    text = _UNTERMINATED_FENCE_RE.sub("", text).strip()
     if len(text) > _MAX_DESC_LEN:
         # Truncate at a word boundary to avoid cutting mid-word.
         truncated = text[:_MAX_DESC_LEN]
@@ -154,9 +159,10 @@ class LLMGenerator:
         Raises:
             LLMNotAvailableError: when the LLM backend cannot be constructed
                 (e.g. openai not installed, no API key).
-            AuthenticationError / APIConnectionError (re-raised): when the
-                error type name is in _ABORT_ON_ERROR_TYPES — signals the
-                caller that all future calls will also fail.
+            Exception with type name in _ABORT_ON_ERROR_TYPES: re-raised so
+                ``enrich_registry`` can abort the whole enrichment run. All
+                other per-tool failures are logged and suppressed here (None
+                is returned), so a single bad tool does not abort the run.
         """
         signature = self._build_signature(tool)
         docstring = tool.description or ""
@@ -212,16 +218,15 @@ class LLMGenerator:
             except LLMNotAvailableError:
                 raise
             except Exception as e:
-                # Auth/connection-class errors: abort enrichment entirely.
-                if type(e).__name__ in _ABORT_ON_ERROR_TYPES:
-                    logger.error(
-                        "LLM enrichment aborted: %s — %s. "
-                        "Check API key and network connectivity.",
-                        type(e).__name__, e,
-                    )
-                    break
-                logger.warning("LLM description failed for tool '%s': %s", tool.name, e)
-                description = None
+                # Only abort-class errors (AuthenticationError, APIConnectionError)
+                # reach here — generate_for_tool swallows per-tool content/rate
+                # failures internally and returns None for them.
+                logger.error(
+                    "LLM enrichment aborted: %s — %s. "
+                    "Check API key and network connectivity.",
+                    type(e).__name__, e,
+                )
+                break
 
             if description:
                 tool.description = description

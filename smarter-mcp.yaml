@@ -19,8 +19,6 @@ sources:
       - "conftest.py"
 
 # routing:
-#   base_path: "/mcp"
-#   root_aggregate: true
 #   separator: "_"
 
 # expose:

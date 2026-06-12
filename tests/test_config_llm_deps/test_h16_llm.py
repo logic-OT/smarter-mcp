@@ -236,6 +236,15 @@ class TestDescriptionSanitization:
         tools = list(registry.get_all_tools())
         assert tools[0].description == expected
 
+    def test_unterminated_fence_stripped(self):
+        """An unterminated opening fence (no closing ```) must not survive sanitization."""
+        from smarter_mcp.llm.generator import _sanitize_description
+
+        result = _sanitize_description("```python\nsome code that never closes")
+        assert "```" not in result, (
+            f"Unterminated fence should be stripped; got: {result!r}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # H16-d: router must NOT truncate multi-line descriptions

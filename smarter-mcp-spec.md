@@ -219,7 +219,7 @@ description: "MCP server for chemistry and utility functions"
 server:
   host: 0.0.0.0
   port: 8000
-  transport: [sse, stdio]   # run both simultaneously
+  transport: sse       # sse | streamable-http | stdio
 
 sources:
   # Local codebase
@@ -243,21 +243,21 @@ sources:
 
 # Global exposure rules
 expose:
-  private: false
-  inherited: false
-  unannotated: warn        # warn | expose | skip
-  variadic: skip           # skip | warn | expose
-  properties: true
+  include_private: false
+  include_inherited: false
+  unannotated_policy: warn        # warn | expose | skip
+  variadic_policy: skip           # skip | warn | expose
+  include_properties: true
 
 # Class instantiation (for path-based discovery)
 instances:
-  - class: my_local_utils.DBClient
-    constructor:
+  - class_name: my_local_utils.DBClient
+    constructor_args:
       host: "${DB_HOST}"     # env var substitution
       port: 5432
     lifecycle: session
 
-  - class: my_local_utils.Pipeline
+  - class_name: my_local_utils.Pipeline
     factory: my_local_utils.build_default_pipeline
     lifecycle: singleton
 
@@ -266,18 +266,10 @@ tools:
   - function: random.choices
     name: random_pick
     description: "Pick k random items from a list, with optional weights"
-    parameters:
-      population:
-        description: "The list of items to choose from"
-      k:
-        description: "Number of items to pick"
 
   - function: json.dumps
     name: to_json
     description: "Convert a Python dict/list to a JSON string"
-    parameters:
-      obj:
-        description: "The object to serialize"
 
   - function: my_local_utils._internal_helper
     expose: false            # explicitly exclude
@@ -285,14 +277,13 @@ tools:
 # Multimodal return type detection
 multimodal:
   auto_detect: true
-  image_format: png
 
 # LLM-assisted description generation
 llm:
   enabled: false
   provider: openrouter
   model: google/gemini-2.0-flash-001
-  cache: true
+  cache_path: .smarter-mcp/description-cache.json
 ```
 
 **CLI auto-detection:** When `smarter-mcp serve ./server.py` is called and the file contains a `SmarterMCP` instance, the CLI imports the file and runs that instance directly — supporting decorator-based servers from the command line.

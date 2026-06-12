@@ -38,7 +38,7 @@ def _resolve_context() -> Context | None:
     try:
         from fastmcp.server.dependencies import get_context
         return get_context()
-    except RuntimeError:
+    except (RuntimeError, ImportError, AttributeError):
         return None
 
 
@@ -104,7 +104,18 @@ def build_tool_wrapper(
 
         # Skip Context-annotated params: the wrapper injects them via
         # _resolve_context(); they must not appear in the MCP tool schema.
-        if param.annotation is Context or param.annotation == "Context":
+        # Also strip Context | None and Optional[Context] (same injection).
+        _ann = param.annotation
+        _is_ctx = (
+            _ann is Context
+            or _ann == "Context"
+            or (isinstance(_ann, str) and "Context" in _ann)
+            or (
+                getattr(_ann, "__args__", None) is not None
+                and any(a is Context for a in _ann.__args__)  # type: ignore[union-attr]
+            )
+        )
+        if _is_ctx:
             continue
 
         type_str = ""
@@ -152,9 +163,24 @@ def build_tool_wrapper(
 
 
 def _detect_context_param(sig: inspect.Signature) -> str | None:
-    """Return the name of the first Context-annotated parameter, or None."""
+    """Return the name of the first Context-annotated parameter, or None.
+
+    Matches bare ``Context``, union/optional types containing ``Context``
+    (e.g. ``Context | None``, ``Optional[Context]``), and PEP-563 string
+    annotations like ``"Context | None"`` or ``"Optional[Context]"``.
+    """
     for pname, p in sig.parameters.items():
-        if p.annotation is Context or p.annotation == "Context":
+        ann = p.annotation
+        if ann is inspect.Parameter.empty:
+            continue
+        if ann is Context or ann == "Context":
+            return pname
+        # String annotation (PEP-563 / from __future__ import annotations).
+        if isinstance(ann, str) and "Context" in ann:
+            return pname
+        # Runtime union/optional: typing.Union[Context, ...] or Context | None.
+        args = getattr(ann, "__args__", None)
+        if args and any(a is Context for a in args):
             return pname
     return None
 

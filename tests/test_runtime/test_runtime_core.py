@@ -138,11 +138,10 @@ async def test_c2_session_lifecycle_increments():
             r1 = await client.call_tool(bump_name, {})
             r2 = await client.call_tool(bump_name, {})
             v1, v2 = _tool_value(r1), _tool_value(r2)
-            assert v2 not in ("1", "1.0"), (
+            assert v2 in ("2", "2.0"), (
                 f"Session lifecycle degraded to per-call: two bumps returned "
                 f"{v1!r} then {v2!r} (expected 1 then 2)"
             )
-            assert v2 in ("2", "2.0"), f"Expected second bump to return 2, got {v2!r}"
     finally:
         sys.path.remove(str(tmp))
         sys.modules.pop(mod_name, None)
@@ -334,6 +333,75 @@ def test_h20_session_instance_thread_safe():
     )
     assert _Conn.instances_created == 1, (
         f"Expected 1 construction, got {_Conn.instances_created}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# M4 — build() is idempotent: test cases not duplicated on second call
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Eviction path — max_sessions param triggers LRU close outside the lock
+# ---------------------------------------------------------------------------
+
+def test_eviction_calls_close_on_oldest_session():
+    """Creating max_sessions+1 distinct sessions evicts the oldest and calls close()."""
+    import types
+    from smarter_mcp.runtime.instances import InstanceManager
+    from smarter_mcp.config.manifest import InstanceConfig
+
+    close_calls: list[int] = []
+
+    class _Tracked:
+        def __init__(self) -> None:
+            self._closed = False
+
+        def close(self) -> None:
+            close_calls.append(id(self))
+            self._closed = True
+
+    max_s = 2
+    mgr = InstanceManager(
+        [InstanceConfig(class_name="_Tracked", lifecycle="session")],
+        max_sessions=max_s,
+    )
+
+    # Create max_sessions+1 distinct sessions; the oldest must be evicted.
+    ctx_objects = [
+        types.SimpleNamespace(session_id=f"evict-sess-{i}") for i in range(max_s + 1)
+    ]
+    instances = [mgr.get_instance("_Tracked", _Tracked, ctx=c) for c in ctx_objects]
+
+    assert len(close_calls) >= 1, (
+        f"Expected at least 1 close() call after {max_s + 1} sessions with "
+        f"max_sessions={max_s}; got close_calls={close_calls}"
+    )
+    assert id(instances[0]) in close_calls, (
+        f"Oldest instance (id={id(instances[0])}) was not closed; "
+        f"close_calls={close_calls}"
+    )
+
+
+def test_id_ctx_fallback_emits_warning(caplog):
+    """ctx with no session_id/client_id triggers a logger.warning naming the class."""
+    import logging
+    import types
+    from smarter_mcp.runtime.instances import InstanceManager
+    from smarter_mcp.config.manifest import InstanceConfig
+
+    class _Plain:
+        pass
+
+    mgr = InstanceManager([InstanceConfig(class_name="_Plain", lifecycle="session")])
+    ctx = types.SimpleNamespace()  # no session_id, no client_id
+
+    with caplog.at_level(logging.WARNING, logger="smarter_mcp.runtime.instances"):
+        inst = mgr.get_instance("_Plain", _Plain, ctx=ctx)
+
+    assert inst is not None
+    assert any("id(ctx)" in r.message for r in caplog.records), (
+        f"Expected a warning mentioning id(ctx) fallback; "
+        f"got records: {[r.message for r in caplog.records]}"
     )
 
 

@@ -45,13 +45,14 @@ _MAX_SESSION_ENTRIES = 256
 def _best_effort_close(instance: Any) -> None:
     """Attempt to release resources held by *instance*.
 
-    Tries (in order): ``close()``, ``aclose()`` (sync-wrapped), ``__exit__``.
+    Tries (in order): ``close()``, ``__exit__``.
     A failure in one path does not prevent the others from running.
     """
     for attr in ("close", "__exit__"):
         fn = getattr(instance, attr, None)
         if fn is None:
             continue
+        result: Any = None
         try:
             if attr == "__exit__":
                 fn(None, None, None)
@@ -72,12 +73,21 @@ def _best_effort_close(instance: Any) -> None:
 class InstanceManager:
     """Manages class instances for tool execution."""
 
-    def __init__(self, configs: list[InstanceConfig]):
+    def __init__(
+        self,
+        configs: list[InstanceConfig],
+        max_sessions: int = _MAX_SESSION_ENTRIES,
+    ):
         """
         Args:
             configs: Instance configurations from the manifest.
+            max_sessions: Maximum number of concurrent sessions tracked before
+                LRU eviction kicks in.  Defaults to ``_MAX_SESSION_ENTRIES``
+                (256).  Pass a smaller value in tests or memory-constrained
+                deployments.
         """
         self._configs = {c.class_name: c for c in configs}
+        self._max_sessions = max_sessions
         self._singletons: dict[str, Any] = {}
         # session_id → {class_name → instance}; bounded LRU so memory stays
         # proportional to active sessions rather than all-time sessions.
@@ -162,27 +172,38 @@ class InstanceManager:
             )
             return self._create_instance(class_name, cls_obj, config)
 
-        session_id = str(
-            getattr(ctx, "session_id", None)
-            or getattr(ctx, "client_id", None)
-            or id(ctx)
-        )
+        _sid_raw = getattr(ctx, "session_id", None) or getattr(ctx, "client_id", None)
+        if _sid_raw is None:
+            logger.warning(
+                "Context for session-scoped class %s has no session_id or "
+                "client_id; falling back to id(ctx)=%d.  Instance will not "
+                "be reused across calls that receive a different ctx object.",
+                class_name,
+                id(ctx),
+            )
+            session_id = str(id(ctx))
+        else:
+            session_id = str(_sid_raw)
 
         # Fast path — check without the lock first.
         session_store = self._session_instances.get(session_id)
         if session_store is not None and class_name in session_store:
-            # Promote to most-recently-used.
+            # Promote to most-recently-used.  Guard against a concurrent
+            # eviction removing session_id between the check above and
+            # acquiring the lock (which would cause move_to_end to KeyError).
             with self._creation_lock:
-                self._session_instances.move_to_end(session_id)
+                if session_id in self._session_instances:
+                    self._session_instances.move_to_end(session_id)
             return session_store[class_name]
 
+        evicted: list[Any] = []
         with self._creation_lock:
             # Re-check inside the lock.
             session_store = self._session_instances.get(session_id)
             if session_store is None:
                 session_store = {}
                 self._session_instances[session_id] = session_store
-                self._evict_if_over_limit()
+                evicted = self._evict_if_over_limit()
             elif class_name in session_store:
                 self._session_instances.move_to_end(session_id)
                 return session_store[class_name]
@@ -192,22 +213,30 @@ class InstanceManager:
             )
             self._session_instances.move_to_end(session_id)
 
+        # Close evicted instances outside the lock so slow I/O does not
+        # stall concurrent instance creation (module docstring promise).
+        for inst in evicted:
+            _best_effort_close(inst)
+
         return session_store[class_name]
 
-    def _evict_if_over_limit(self) -> None:
+    def _evict_if_over_limit(self) -> list[Any]:
         """Evict the oldest session entry when the dict exceeds the size cap.
 
         Must be called while holding ``_creation_lock``.
+        Returns the evicted instances so the caller can close them outside
+        the lock, keeping slow I/O off the critical section.
         """
-        while len(self._session_instances) > _MAX_SESSION_ENTRIES:
+        evicted: list[Any] = []
+        while len(self._session_instances) > self._max_sessions:
             _sid, old_store = self._session_instances.popitem(last=False)
             logger.debug(
                 "Session instance LRU eviction: session_id=%s, classes=%s",
                 _sid,
                 list(old_store.keys()),
             )
-            for instance in old_store.values():
-                _best_effort_close(instance)
+            evicted.extend(old_store.values())
+        return evicted
 
     def _create_instance(
         self,

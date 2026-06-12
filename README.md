@@ -1,3 +1,4 @@
+<img width="770" height="159" alt="image" src="https://github.com/user-attachments/assets/2be86ef1-e7f6-4fc4-8b4c-89ab3b98124a" />
 # Smarter-MCP
 
 > **The highest-level Python framework for building, generating, and running MCP servers.**

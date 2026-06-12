@@ -26,6 +26,24 @@ class _MISSING_TYPE:
 MISSING = _MISSING_TYPE()
 
 
+class _NON_LITERAL_TYPE:
+    """Sentinel indicating a parameter default is non-literal (e.g. datetime.now()).
+
+    Stored by the AST extractor when a default expression cannot be evaluated
+    via ``ast.literal_eval``.  Callers must NOT emit this value as a JSON
+    schema default or use it for type inference.
+    """
+
+    def __repr__(self) -> str:
+        return "<NON_LITERAL>"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+NON_LITERAL = _NON_LITERAL_TYPE()
+
+
 class CallableKind(str, Enum):
     """The kind of callable extracted from source code."""
 

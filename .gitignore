@@ -28,8 +28,11 @@ htmlcov/
 # Tools
 .ruff_cache/
 
+# Local logs (validation harness output, etc.) — never committed
+logs/
+
 # Smarter-MCP runtime artifacts (extraction cache, LLM description cache)
 .smarter-mcp/
-/tests
 /docs/superpowers
 pending.md
+.claude/settings.json

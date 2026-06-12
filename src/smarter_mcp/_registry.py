@@ -3,11 +3,21 @@ from __future__ import annotations
 import inspect
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Protocol
 
-from .extractor.models import ExtractedCallable, ExtractionResult
+from .extractor.models import ExtractedCallable, ExtractedModule, ExtractionResult
 
 logger = logging.getLogger(__name__)
+
+
+class _HasModules(Protocol):
+    """Structural type for any object that exposes a list of ExtractedModules.
+
+    Both ``ExtractionResult`` and ``FilterResult`` satisfy this protocol,
+    allowing ``merge_extraction`` to accept either without an explicit Union.
+    """
+
+    modules: list[ExtractedModule]
 
 
 @dataclass
@@ -131,7 +141,7 @@ class ToolRegistry:
 
     def merge_extraction(
         self,
-        extraction: ExtractionResult,
+        extraction: _HasModules,
         implementations: dict[str, Callable],
         namespace_override: str | None = None
     ) -> None:

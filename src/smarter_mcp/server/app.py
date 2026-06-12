@@ -139,7 +139,7 @@ def _exposure_rules_from_config(config: ManifestConfig) -> ExposureRules:
 def _resolve_implementations(
     result: ExtractionResult,
     source_root: str,
-) -> dict[str, Callable]:
+) -> tuple[dict[str, Callable], int, int]:
     """Import modules and resolve the actual callable python objects from an extraction result.
 
     This handles dynamic loading of the python modules detected in the source root directory.
@@ -157,10 +157,14 @@ def _resolve_implementations(
         source_root: The file path root directory containing the source code.
 
     Returns:
-        A dictionary mapping qualified callable names (e.g., "pkg.mod.func" or "pkg.mod.Cls.method")
-        to their actual Python callable objects.
+        A 3-tuple of (impls, failed_module_count, skipped_tool_count):
+        - impls: dict mapping qualified callable names to Python callable objects.
+        - failed_module_count: number of modules that failed to import.
+        - skipped_tool_count: total number of tools unavailable due to import failures.
     """
     impls: dict[str, Callable] = {}
+    failed_modules = 0
+    skipped_tools = 0
 
     # Temporarily prepend source_root to sys.path so the modules import, then
     # restore it. sys.path is global, so we snapshot/restore under the shared
@@ -182,6 +186,8 @@ def _resolve_implementations(
                         "module will be unavailable.",
                         module.module_name, e,
                     )
+                    failed_modules += 1
+                    skipped_tools += len(module.all_callables)
                     continue
 
                 # Resolve functions
@@ -209,7 +215,15 @@ def _resolve_implementations(
         finally:
             sys.path = original_path
 
-    return impls
+    # M6: one end-of-pass summary so operators know the aggregate impact of
+    # import failures without having to scan per-module ERROR lines.
+    if failed_modules:
+        logger.error(
+            "%d module(s) failed to import; %d tool(s) skipped.",
+            failed_modules, skipped_tools,
+        )
+
+    return impls, failed_modules, skipped_tools
 
 
 class SmarterMCP:
@@ -390,6 +404,9 @@ class SmarterMCP:
 
         self._registry = ToolRegistry()
         self._instance_manager = InstanceManager(self._config.instances)
+        # Accumulates the count of modules that failed to import across all
+        # _resolve_implementations calls; surfaced in the /health endpoint.
+        self._import_failure_count: int = 0
 
         # Track which decorator-registered objects this instance has already
         # consumed, so repeated build() calls don't double-register and the
@@ -464,7 +481,8 @@ class SmarterMCP:
             self._extraction.warnings.extend(extraction.warnings)
             self._extraction.modules.extend(extraction.modules)
 
-        impls = _resolve_implementations(extraction, str(path))
+        impls, import_fails, _skipped = _resolve_implementations(extraction, str(path))
+        self._import_failure_count += import_fails
 
         rules = _exposure_rules_from_config(self._config)
         filtered = apply_filters(extraction, rules)
@@ -610,7 +628,8 @@ class SmarterMCP:
                 )
                 source_root_str = str(Path(source_file).parent)
 
-            impls = _resolve_implementations(extraction, source_root_str)
+            impls, import_fails, _skipped = _resolve_implementations(extraction, source_root_str)
+            self._import_failure_count += import_fails
 
             # Apply include/exclude filters across all modules.
             if include or exclude:
@@ -857,7 +876,12 @@ class SmarterMCP:
         from smarter_mcp.server.health import HealthEndpoint
         from smarter_mcp.server.schema_endpoint import SchemaEndpoint
 
-        _health_ep = HealthEndpoint(self._router, self._registry)
+        _health_ep = HealthEndpoint(
+            self._router,
+            self._registry,
+            extraction_result=self._extraction,
+            import_failure_count=self._import_failure_count,
+        )
         _schema_ep = SchemaEndpoint(self._registry)
 
         @self._server.custom_route("/health", methods=["GET"])

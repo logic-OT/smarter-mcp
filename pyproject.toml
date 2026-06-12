@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["mcp", "model-context-protocol", "ai", "agents", "fastmcp"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -44,6 +44,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "watchfiles>=0.20",
     "ruff>=0.4",
+    "mypy>=1.10",
 ]
 all = ["smarter-mcp[multimodal,llm,dev]"]
 
@@ -62,7 +63,28 @@ target-version = "py310"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
+select = ["E", "F", "I", "W", "B", "UP", "RUF", "S"]
+ignore = [
+    # Line length — docstrings and comments often exceed 100 chars; formatter handles wrapping
+    "E501",
+    # 0.0.0.0 binding is intentional and config-gated (default is 127.0.0.1 since H1 fix)
+    "S104",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# assert is idiomatic in pytest; bandit S101 fires on every assertion
+"tests/**" = ["S101"]
+
+[tool.mypy]
+# Pragmatic mypy config — not strict-everywhere; scoped to src/ for CI.
+# Goal: run without crashing and catch obvious type errors in the public API.
+# mypy is run as non-blocking in CI (continue-on-error: true) until the full
+# type annotation pass is completed.
+python_version = "3.10"
+ignore_missing_imports = true
+# fastmcp, PIL, numpy, openai have incomplete or absent stubs
+warn_unused_ignores = false
+check_untyped_defs = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

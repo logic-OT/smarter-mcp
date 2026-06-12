@@ -1,5 +1,8 @@
 # Update Log — smarter-mcp
 
+## Friday, 12-06-2026, 5:41 pm, [feat/discovery-api] Task 5 — dead config wiring complete
+Wired remaining dead config fields: `server.log_level` sets root logger at `SmarterMCP.__init__`; `multimodal.auto_detect` gates `coerce_to_fastmcp_image` in both `_build_function_wrapper` and `_build_method_wrapper`, passed from `NamespaceRouter._register_tool`; `SourceConfig.include` for path sources now restricts `SurfaceExtractor._discover_files` via new `include_patterns` param, wired through `discover()` and `build()`. Fixed `sys.modules` pollution in test fixture that caused order-dependent failure in CLI init test. All 209 tests pass.
+
 ## Friday, 12-06-2026, 4:57 pm, [feat/discovery-api] PR4 — discovery + API contract fixes
 Resolved C3 (ctor arg order: `name` first, `source_root` kw-only, nonexistent path raises, `find_manifest` bounded at VCS boundary), C4 (`discover_module` works for packages + classes, invocable end-to-end), C5 (extraction errors surfaced in discover/validate/health, `validate` exits non-zero), H12 (decorator tools served unprefixed; full dotted-path namespaces; collision warnings), H13 (`@property` resources bound via InstanceManager), H14 (manifest source paths resolved relative to manifest dir), M6 (import-failure ERROR + aggregate summary, exposed in /health), M8 (`extraction_result` populated). Two-stage review caught a tuple-unpack crash in `init`, a `rstrip(".py")` name-mangling bug, in-place ExtractionResult cache mutation, and an H13 test that didn't test the fix — all fixed. 153 tests pass; harness C3/C4a/C4b/C5 NOT REPRODUCED.
 

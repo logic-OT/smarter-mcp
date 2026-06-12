@@ -627,6 +627,9 @@ class SurfaceExtractor:
         source_root: Absolute path to the root of the Python source tree.
         use_inspect: Whether to perform the inspect pass (requires importing modules).
         exclude_patterns: Glob patterns for files to skip (e.g., "test_*", "*_test.py").
+        include_patterns: When non-empty, only files matching at least one of these
+            glob patterns are processed.  An empty list (the default) scans all
+            files that are not excluded.
         use_cache: Enable the disk extraction cache (off by default). Also honors
             the SMARTER_MCP_EXTRACTION_CACHE / SMARTER_MCP_NO_CACHE env vars.
         cache_dir: Where to store cache entries (defaults to .smarter-mcp/extraction-cache).
@@ -637,12 +640,14 @@ class SurfaceExtractor:
         source_root: str | Path,
         use_inspect: bool = True,
         exclude_patterns: list[str] | None = None,
+        include_patterns: list[str] | None = None,
         use_cache: bool = False,
         cache_dir: str | Path | None = None,
     ):
         self.source_root = Path(source_root).resolve()
         self.use_inspect = use_inspect
         self.exclude_patterns = exclude_patterns or ["test_*", "*_test.py", "conftest.py"]
+        self.include_patterns: list[str] = include_patterns or []
 
         self._cache: ExtractionCache | None = (
             ExtractionCache(cache_dir) if cache_enabled(use_cache) else None
@@ -711,6 +716,10 @@ class SurfaceExtractor:
                 # User-supplied exclude globs (e.g. test_*, *_test.py).
                 if self._is_excluded(py_file):
                     continue
+                # User-supplied include globs — when non-empty, act as an
+                # allow-list: only files matching at least one pattern are kept.
+                if not self._is_included(py_file):
+                    continue
                 files.append(py_file)
 
         files.sort()
@@ -735,6 +744,16 @@ class SurfaceExtractor:
     def _is_excluded(self, file_path: Path) -> bool:
         """Check if a file matches any exclude pattern."""
         for pattern in self.exclude_patterns:
+            if file_path.match(pattern):
+                return True
+        return False
+
+    def _is_included(self, file_path: Path) -> bool:
+        """When include_patterns is non-empty, return True only if the file matches
+        at least one pattern.  When include_patterns is empty, every file passes."""
+        if not self.include_patterns:
+            return True
+        for pattern in self.include_patterns:
             if file_path.match(pattern):
                 return True
         return False

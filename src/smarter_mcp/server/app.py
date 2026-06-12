@@ -425,12 +425,22 @@ class SmarterMCP:
         # does not re-extend tool.tests with duplicate cases.
         self._tests_wired: bool = False
 
+        # Wire server.log_level: configure the root Python logger level so the
+        # manifest controls verbosity without requiring CLI flags.  An invalid
+        # value (e.g. "verbose" instead of "debug") is silently ignored so a
+        # typo does not prevent the server from starting.
+        _level_name = self._config.server.log_level.upper()
+        _level = getattr(logging, _level_name, None)
+        if isinstance(_level, int):
+            logging.getLogger().setLevel(_level)
+
 
 
     def discover(
         self,
         source_root: str | Path,
         exclude: list[str] | None = None,
+        include: list[str] | None = None,
         use_cache: bool = False,
     ) -> SmarterMCP:
         """Scan the filesystem within a source directory to discover and register tools.
@@ -443,6 +453,8 @@ class SmarterMCP:
                 Raises ``ValueError`` when the path does not exist (C3 fix).
             exclude: Glob patterns or filenames to skip during AST extraction. Defaults to
                 filtering test files like `test_*`, `*_test.py`, and `conftest.py`.
+            include: When non-empty, only files matching at least one of these glob patterns
+                are scanned.  Wired from ``SourceConfig.include`` in manifest sources.
             use_cache: If True, uses the disk cache to skip unchanged source files during AST
                 extraction, speeding up startup times.
 
@@ -462,6 +474,7 @@ class SmarterMCP:
             source_root=path,
             use_inspect=self._use_inspect,
             exclude_patterns=exclude or ["test_*", "*_test.py", "conftest.py"],
+            include_patterns=include or [],
             use_cache=use_cache,
         )
         extraction = extractor.extract()
@@ -833,7 +846,11 @@ class SmarterMCP:
                     )
                     continue
 
-                self.discover(str(src_path), exclude=source.exclude)
+                self.discover(
+                    str(src_path),
+                    exclude=source.exclude,
+                    include=source.include if source.include else None,
+                )
 
         # Step 2: Wire manifest test cases into the registry.
         # ToolOverride.tests defined in YAML need to be merged into the

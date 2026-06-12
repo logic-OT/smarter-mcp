@@ -244,7 +244,12 @@ class NamespaceRouter:
         impl = tool.fn
 
         from smarter_mcp.runtime.tool_wrapper import build_tool_wrapper
-        impl = build_tool_wrapper(tool, impl, self.instance_manager)
+        impl = build_tool_wrapper(
+            tool,
+            impl,
+            self.instance_manager,
+            auto_detect=self.config.multimodal.auto_detect,
+        )
 
         # Register with FastMCP
         try:

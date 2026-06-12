@@ -46,6 +46,8 @@ def build_tool_wrapper(
     tool: RegisteredTool,
     impl: Callable,
     instance_manager: InstanceManager | None = None,
+    *,
+    auto_detect: bool = True,
 ) -> Callable:
     """Build a FastMCP-compatible wrapper for a callable.
 
@@ -64,17 +66,19 @@ def build_tool_wrapper(
 
     if not is_method or kind == CallableKind.STATICMETHOD:
         # Free functions and static methods: no instance injection.
-        wrapper = _build_function_wrapper(tool, impl, is_async)
+        wrapper = _build_function_wrapper(tool, impl, is_async, auto_detect=auto_detect)
     elif kind == CallableKind.CLASSMETHOD:
         # Classmethods: the impl retrieved via getattr(cls, name) is already
         # bound to the class (Python's descriptor protocol provides cls
         # automatically).  Treat like a plain function — no instance injection.
-        wrapper = _build_function_wrapper(tool, impl, is_async)
+        wrapper = _build_function_wrapper(tool, impl, is_async, auto_detect=auto_detect)
     else:
         # Regular instance method: needs an instance from the manager.
         if not instance_manager:
             raise ValueError("instance_manager is required for wrapping methods")
-        wrapper = _build_method_wrapper(tool, impl, instance_manager, is_async)
+        wrapper = _build_method_wrapper(
+            tool, impl, instance_manager, is_async, auto_detect=auto_detect
+        )
 
     # Forge the FastMCP-visible signature from the impl's parameters.
     #
@@ -189,6 +193,8 @@ def _build_function_wrapper(
     tool: RegisteredTool,
     impl: Callable,
     is_async: bool,
+    *,
+    auto_detect: bool = True,
 ) -> Callable:
     """Wrap a module-level function, static method, or (bound) class method."""
 
@@ -208,7 +214,7 @@ def _build_function_wrapper(
                     res = await impl(**{ctx_param_name: ctx}, **coerced_kwargs)
                 else:
                     res = await impl(**coerced_kwargs)
-                return coerce_to_fastmcp_image(res)
+                return coerce_to_fastmcp_image(res) if auto_detect else res
             except CoercionError as e:
                 logger.warning("Coercion error in tool '%s': %s", tool.name, e)
                 return format_error_response(tool.name, e)
@@ -228,7 +234,7 @@ def _build_function_wrapper(
                     res = impl(**{ctx_param_name: ctx}, **coerced_kwargs)
                 else:
                     res = impl(**coerced_kwargs)
-                return coerce_to_fastmcp_image(res)
+                return coerce_to_fastmcp_image(res) if auto_detect else res
             except CoercionError as e:
                 logger.warning("Coercion error in tool '%s': %s", tool.name, e)
                 return format_error_response(tool.name, e)
@@ -245,6 +251,8 @@ def _build_method_wrapper(
     impl: Callable,
     manager: InstanceManager,
     is_async: bool,
+    *,
+    auto_detect: bool = True,
 ) -> Callable:
     """Wrap a regular instance method."""
 
@@ -281,7 +289,7 @@ def _build_method_wrapper(
                     res = await impl(instance, **{ctx_param_name: ctx}, **coerced_kwargs)
                 else:
                     res = await impl(instance, **coerced_kwargs)
-                return coerce_to_fastmcp_image(res)
+                return coerce_to_fastmcp_image(res) if auto_detect else res
             except CoercionError as e:
                 logger.warning("Coercion error in tool '%s': %s", tool.name, e)
                 return format_error_response(tool.name, e)
@@ -302,7 +310,7 @@ def _build_method_wrapper(
                     res = impl(instance, **{ctx_param_name: ctx}, **coerced_kwargs)
                 else:
                     res = impl(instance, **coerced_kwargs)
-                return coerce_to_fastmcp_image(res)
+                return coerce_to_fastmcp_image(res) if auto_detect else res
             except CoercionError as e:
                 logger.warning("Coercion error in tool '%s': %s", tool.name, e)
                 return format_error_response(tool.name, e)

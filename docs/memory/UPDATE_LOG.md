@@ -1,5 +1,9 @@
 # Update Log — smarter-mcp
 
+## Friday, 12-06-2026, 8:08 pm, [feat/production-hardening] CI fix: tomllib→tomli fallback for Python 3.10
+
+Moved bare `import tomllib` (Python 3.11+ stdlib) out of two test functions in `tests/test_config_llm_deps/test_h19_deps.py` into a module-level `try/except ModuleNotFoundError` fallback that imports `tomli` on Python 3.10. Added `"tomli>=2.0; python_version < '3.11'"` to the `dev` extra in `pyproject.toml` so CI 3.10 matrix installs the backport while 3.11+ uses stdlib. 313 passed, 2 skipped; ruff clean.
+
 ## Friday, 12-06-2026, 8:03 pm, [feat/production-hardening] Final review followups — __main__, README model id, mypy CI, orphan helper
 
 Added `src/smarter_mcp/__main__.py` so `python -m smarter_mcp` works. Fixed README model-ID examples (`claude-3-5-haiku` → `claude-3-5-haiku-20241022`, both YAML and Python snippets). Added non-blocking mypy step to `.github/workflows/ci.yml` (`continue-on-error: true`) — resolves pyproject.toml comment that claimed CI ran mypy but didn't. Removed orphaned `build_ip_rate_limit_middleware()` from `server/security.py` (unused; app.py wires `IPRateLimitMiddleware` directly). 313 passed, 2 skipped; ruff clean.

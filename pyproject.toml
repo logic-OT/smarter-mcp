@@ -45,6 +45,7 @@ dev = [
     "watchfiles>=0.20",
     "ruff>=0.4",
     "mypy>=1.10",
+    "tomli>=2.0; python_version < '3.11'",
 ]
 # e2e: Agno agent-framework + real MCP wire tests (stdio transport).
 # Kept separate from dev so the main suite never needs these heavy deps.

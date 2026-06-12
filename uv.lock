@@ -2064,6 +2064,7 @@ all = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "watchfiles" },
 ]
 dev = [
@@ -2071,6 +2072,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "watchfiles" },
 ]
 e2e = [
@@ -2104,6 +2106,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "smarter-mcp", extras = ["multimodal", "llm", "dev", "e2e"], marker = "extra == 'all'" },
+    { name = "tomli", marker = "python_full_version < '3.11' and extra == 'dev'", specifier = ">=2.0" },
     { name = "watchfiles", marker = "extra == 'dev'", specifier = ">=0.20" },
 ]
 provides-extras = ["multimodal", "llm", "dev", "e2e", "all"]

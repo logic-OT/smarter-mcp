@@ -4,6 +4,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore[no-redef]
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -79,8 +84,6 @@ def test_h19_jinja2_not_in_source():
 
 def test_h19_openai_not_in_mandatory_deps():
     """openai must be in the [llm] optional extra, not mandatory dependencies."""
-    import tomllib
-
     pyproject = _REPO_ROOT / "pyproject.toml"
     with open(pyproject, "rb") as f:
         data = tomllib.load(f)
@@ -101,8 +104,6 @@ def test_h19_openai_not_in_mandatory_deps():
 
 def test_a3_fastmcp_upper_bound_pinned():
     """fastmcp must have an upper bound (e.g. <4) to guard internal imports."""
-    import tomllib
-
     pyproject = _REPO_ROOT / "pyproject.toml"
     with open(pyproject, "rb") as f:
         data = tomllib.load(f)

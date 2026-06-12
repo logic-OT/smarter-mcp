@@ -74,7 +74,7 @@ The `@toolkit()` decorator handles:
 - Automatic class instantiation with the specified lifecycle (session, singleton, or per-call)
 - `self` binding on every tool call — each MCP session gets its own instance
 - Constructor argument injection from decorator kwargs or environment variables
-- Cleanup on session end
+- Session instances evicted via bounded LRU (max 256 entries) with best-effort cleanup (`close()`/`__exit__`) on eviction
 
 **Resources:**
 

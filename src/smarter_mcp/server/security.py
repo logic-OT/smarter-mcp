@@ -393,21 +393,3 @@ def build_rate_limit_middleware(config: ServerConfig) -> list:
     return [per_session, global_limit]
 
 
-def build_ip_rate_limit_middleware(
-    config: ServerConfig,
-    *,
-    app: Any,
-) -> Any | None:
-    """Build an IP-based HTTP rate-limiter (M18).
-
-    Returns None when rate limiting is disabled, otherwise a configured
-    ``IPRateLimitMiddleware`` wrapping ``app``.  This is an ASGI middleware
-    so it must be applied to the Starlette application, not the MCP layer.
-    """
-    if not config.rate_limit_enabled:
-        return None
-    return IPRateLimitMiddleware(
-        app,
-        max_requests=config.rate_limit_per_minute,
-        window_seconds=60,
-    )

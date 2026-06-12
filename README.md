@@ -101,7 +101,7 @@ Point Smarter-MCP at an undocumented library and it will write the tool descript
 llm:
   enabled: true
   provider: anthropic        # or openai, openrouter
-  model: claude-3-5-haiku
+  model: claude-3-5-haiku-20241022
   cache_path: .smarter-mcp/description-cache.json
 ```
 or in code:
@@ -111,7 +111,7 @@ server = SmarterMCP(
     "my-server",
     llm_enabled=True,
     llm_provider="anthropic",
-    llm_model="claude-3-5-haiku",
+    llm_model="claude-3-5-haiku-20241022",
 )
 server.run()
 ```

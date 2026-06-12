@@ -26,3 +26,6 @@ jobs:
         run: uv run ruff check src/ tests/
       - name: Test (pytest)
         run: uv run pytest -q
+      - name: Type check (mypy, non-blocking)
+        run: uv run --extra dev mypy src/
+        continue-on-error: true

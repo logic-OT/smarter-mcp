@@ -1,5 +1,9 @@
 # Update Log — smarter-mcp
 
+## Friday, 12-06-2026, 8:03 pm, [feat/production-hardening] Final review followups — __main__, README model id, mypy CI, orphan helper
+
+Added `src/smarter_mcp/__main__.py` so `python -m smarter_mcp` works. Fixed README model-ID examples (`claude-3-5-haiku` → `claude-3-5-haiku-20241022`, both YAML and Python snippets). Added non-blocking mypy step to `.github/workflows/ci.yml` (`continue-on-error: true`) — resolves pyproject.toml comment that claimed CI ran mypy but didn't. Removed orphaned `build_ip_rate_limit_middleware()` from `server/security.py` (unused; app.py wires `IPRateLimitMiddleware` directly). 313 passed, 2 skipped; ruff clean.
+
 ## Friday, 12-06-2026, 7:50 pm, [feat/production-hardening] Agno↔MCP e2e test — capstone integration
 
 Added `e2e` optional-dep group (`agno>=1.4`, `anthropic>=0.30`, `mcp>=1.0`) to `pyproject.toml`; added to `all` extra; registered `e2e` pytest marker. Created `tests/test_e2e_agno/server_tools.py` (real server exposing `format_greeting`, `compute_stats`, `ShoppingCart` toolkit) and `tests/test_e2e_agno/test_agno_mcp.py` with 10 deterministic tests (discovery + invocation over stdio wire) and 2 key-gated agent tests. Discovered: `python -m smarter_mcp` fails (no `__main__.py`) — fixed by using venv-bin `smarter-mcp` script path; anyio cancel-scope teardown mismatch with pytest-asyncio 1.x — fixed by using `connect()`/`close()` instead of `async with`. All 10 e2e deterministic tests pass (C1 string return, H11 list coercion, C2 session lifecycle). Agent tests correctly skip without ANTHROPIC_API_KEY. Full suite: 313 passed, 2 skipped; ruff clean.

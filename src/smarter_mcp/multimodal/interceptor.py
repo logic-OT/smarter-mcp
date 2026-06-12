@@ -109,18 +109,22 @@ def resolve_image_input(val: Any, target_type: str) -> Any:
 
     return val
 
-def coerce_to_fastmcp_image(val: Any) -> Image:
-    """
-    Converts a PIL Image, NumPy array, bytes, or Path into a fastmcp.Image.
+def coerce_to_fastmcp_image(val: Any) -> Any:
+    """Convert a genuine image value into a fastmcp.Image.
+
+    Only PIL.Image.Image instances and NumPy arrays are converted; an already-
+    wrapped fastmcp.Image is returned as-is.  All other types (str, bytes, Path,
+    int, dict, …) are returned unchanged so that ordinary tool return values
+    pass through the MCP wire protocol without modification.
+
+    Rationale for removing the str/bytes/Path branches: treating every string
+    as an image file-path breaks every tool that returns plain text (the string
+    is handed to fastmcp.Image(path=…) and fails with FileNotFoundError when the
+    string is not a valid path).  Image data in those forms must be explicitly
+    wrapped by the tool author.
     """
     if isinstance(val, Image):
         return val
-
-    if isinstance(val, (Path, str)):
-        return Image(path=str(val))
-
-    if isinstance(val, bytes):
-        return Image(data=val, format="png")
 
     if is_pillow_available():
         import PIL.Image
@@ -145,4 +149,5 @@ def coerce_to_fastmcp_image(val: Any) -> Image:
             img.save(buf, format="PNG")
             return Image(data=buf.getvalue(), format="png")
 
+    # Not a recognised image type — return unchanged.
     return val

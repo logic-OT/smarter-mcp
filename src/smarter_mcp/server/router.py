@@ -77,14 +77,19 @@ def _build_tool_name(
 
 
 def _build_tool_description(tool: RegisteredTool | RegisteredResource) -> str:
-    """Generate a description for the MCP tool or resource."""
-    if tool.description:
-        # Use first line of description/docstring
-        first_line = tool.description.strip().split("\n")[0].strip()
-        if first_line:
-            return first_line
+    """Return the full description for an MCP tool or resource.
 
-    # Auto-generate a basic description
+    Explicit ``@tool("...")`` strings and LLM-generated descriptions may span
+    multiple lines — truncating them to the first line discards meaningful
+    content and wastes LLM-generated text.  Only auto-generated placeholders
+    are necessarily terse.
+    """
+    if tool.description:
+        # Return the full description unchanged — do NOT truncate to the first
+        # line.  Multi-line docstrings and LLM descriptions must survive intact.
+        return tool.description.strip()
+
+    # Auto-generate a minimal placeholder when no description is available.
     if isinstance(tool, RegisteredTool):
         if tool.class_name:
             return f"{tool.class_name}.{tool.name}()"

@@ -13,6 +13,7 @@ import hashlib
 import inspect
 import json
 import logging
+import re
 from pathlib import Path
 
 from smarter_mcp._registry import RegisteredTool, ToolRegistry
@@ -28,6 +29,35 @@ _SYSTEM_PROMPT = (
     "what the tool does and when to use it. Do not use markdown, code fences, "
     "or quotes. Do not restate the parameter list."
 )
+
+# Maximum length (chars) for a cached description.
+_MAX_DESC_LEN = 500
+
+# Regex to strip markdown code fences (``` ... ```) from LLM output.
+_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+
+# Error class names that indicate ALL future LLM calls will also fail.
+# Using class name strings avoids a hard dependency on the openai package.
+_ABORT_ON_ERROR_TYPES: frozenset[str] = frozenset({
+    "AuthenticationError",
+    "APIConnectionError",
+})
+
+
+def _sanitize_description(text: str) -> str:
+    """Strip markdown code fences and cap length for safe caching.
+
+    LLM output occasionally includes fenced code blocks despite system prompt
+    instructions. We strip them and cap the length to prevent unbounded cache
+    growth and to ensure descriptions fit in tool schemas.
+    """
+    text = _FENCE_RE.sub("", text).strip()
+    if len(text) > _MAX_DESC_LEN:
+        # Truncate at a word boundary to avoid cutting mid-word.
+        truncated = text[:_MAX_DESC_LEN]
+        last_space = truncated.rfind(" ")
+        text = (truncated[:last_space] if last_space > 0 else truncated) + "…"
+    return text
 
 
 class LLMGenerator:
@@ -120,6 +150,13 @@ class LLMGenerator:
         """Generate (or fetch from cache) a description for a single tool.
 
         Returns the description string, or None if generation failed.
+
+        Raises:
+            LLMNotAvailableError: when the LLM backend cannot be constructed
+                (e.g. openai not installed, no API key).
+            AuthenticationError / APIConnectionError (re-raised): when the
+                error type name is in _ABORT_ON_ERROR_TYPES — signals the
+                caller that all future calls will also fail.
         """
         signature = self._build_signature(tool)
         docstring = tool.description or ""
@@ -131,10 +168,16 @@ class LLMGenerator:
         try:
             client = self._get_client()
             user_prompt = self._build_user_prompt(signature, docstring)
-            description = client.generate(_SYSTEM_PROMPT, user_prompt).strip()
+            raw = client.generate(_SYSTEM_PROMPT, user_prompt)
+            description = _sanitize_description(raw)
         except LLMNotAvailableError:
             raise
-        except Exception as e:  # noqa: BLE001 - one bad tool shouldn't abort the run
+        except Exception as e:
+            # Auth/connection errors signal that all future calls will also fail;
+            # re-raise them so enrich_registry can abort the loop.
+            if type(e).__name__ in _ABORT_ON_ERROR_TYPES:
+                raise
+            # Per-tool content/rate errors: log and skip this tool only.
             logger.warning("LLM description failed for tool '%s': %s", tool.name, e)
             return None
 
@@ -149,16 +192,48 @@ class LLMGenerator:
         """Fill in descriptions for tools across the whole registry.
 
         Returns the number of descriptions written. Persists the cache before
-        returning.
+        returning, pruning stale entries (tools no longer in the registry).
         """
         written = 0
+        # Collect the cache key for every tool currently in the registry so we
+        # can prune stale entries (from deleted/renamed tools) before saving.
+        active_keys: set[str] = set()
+
         for tool in registry.get_all_tools():
+            sig = self._build_signature(tool)
+            doc = tool.description or ""
+            active_keys.add(self._cache_key(sig, doc))
+
             if not self._needs_description(tool):
                 continue
-            description = self.generate_for_tool(tool)
+
+            try:
+                description = self.generate_for_tool(tool)
+            except LLMNotAvailableError:
+                raise
+            except Exception as e:
+                # Auth/connection-class errors: abort enrichment entirely.
+                if type(e).__name__ in _ABORT_ON_ERROR_TYPES:
+                    logger.error(
+                        "LLM enrichment aborted: %s — %s. "
+                        "Check API key and network connectivity.",
+                        type(e).__name__, e,
+                    )
+                    break
+                logger.warning("LLM description failed for tool '%s': %s", tool.name, e)
+                description = None
+
             if description:
                 tool.description = description
                 written += 1
+
+        # Prune cache entries whose tools are no longer in this registry.
+        # This prevents unbounded growth from renamed or deleted tools.
+        stale = set(self._cache) - active_keys
+        if stale:
+            for k in stale:
+                del self._cache[k]
+            self._dirty = True
 
         self.save_cache()
         if written:

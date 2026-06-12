@@ -823,7 +823,7 @@ cd /path/to/your/other/project
 source .venv/bin/activate
 
 # Install smarter-mcp from your local checkout (editable)
-pip install -e "/path/to/pymcp[all]"
+pip install -e "/path/to/smarter-mcp[all]"
 ```
 
 The `-e` flag means changes to the smarter-mcp source take effect immediately — no re-install needed.

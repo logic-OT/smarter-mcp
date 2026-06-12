@@ -3,6 +3,11 @@ Health endpoint definition.
 
 Returns status, counts of namespaces/tools/resources, and version info.
 Status is "degraded" when any extraction or import failures are present.
+
+H8 security: unauthenticated callers receive only the bare ``{"status": ...}``
+field so that the server surface (namespace list, tool counts, version) is not
+disclosed without authentication.  Pass ``authenticated=True`` to get the full
+detail payload.
 """
 
 from __future__ import annotations
@@ -34,27 +39,37 @@ class HealthEndpoint:
         self._import_failure_count = import_failure_count
         self.start_time = time.time()
 
-    def get_health(self) -> dict[str, Any]:
-        """Generate health status report."""
-        uptime = int(time.time() - self.start_time)
+    def get_health(self, *, authenticated: bool = False) -> dict[str, Any]:
+        """Generate health status report.
 
+        Args:
+            authenticated: When True, include full detail (namespaces, counts,
+                version).  When False (default, unauthenticated callers), return
+                only ``{"status": ...}`` so the tool surface is not disclosed
+                without valid credentials (H8).
+        """
+        extraction_errors = (
+            len(self._extraction_result.errors)
+            if self._extraction_result is not None
+            else 0
+        )
+        import_failures = self._import_failure_count
+        failed_modules = extraction_errors + import_failures
+
+        status = "degraded" if failed_modules > 0 else "healthy"
+
+        # Unauthenticated callers get the bare status only.
+        if not authenticated:
+            return {"status": status}
+
+        # Authenticated callers get full detail.
+        uptime = int(time.time() - self.start_time)
         namespaces = self.router.namespaces
         tool_count = len(self.registry.get_all_tools())
         resource_count = sum(
             len(self.registry.get_namespace_resources(ns))
             for ns in self.registry.get_all_namespaces()
         )
-
-        extraction_errors = (
-            len(self._extraction_result.errors)
-            if self._extraction_result is not None
-            else 0
-        )
-        # failed_modules covers both AST-parse failures and import failures.
-        import_failures = self._import_failure_count
-        failed_modules = extraction_errors + import_failures
-
-        status = "degraded" if failed_modules > 0 else "healthy"
 
         return {
             "status": status,

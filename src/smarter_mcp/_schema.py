@@ -12,7 +12,8 @@ ToolTestRunner (for schema validation checks).
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from smarter_mcp._registry import RegisteredTool
 from smarter_mcp._typeparse import is_multimodal_type, type_str_to_json_schema
@@ -76,13 +77,18 @@ def _schema_from_extracted(tool: RegisteredTool) -> dict[str, Any]:
             else:
                 prop["description"] = hint
 
-        # Default value — skip NON_LITERAL and None sentinels
+        # Default value — skip NON_LITERAL and None sentinels, guard serializability
         if (
             param.has_default
             and param.default is not None
             and not isinstance(param.default, _NON_LITERAL_TYPE)
         ):
-            prop["default"] = param.default
+            try:
+                import json as _json
+                _json.dumps(param.default)
+                prop["default"] = param.default
+            except (TypeError, ValueError):
+                pass  # Non-serializable default — omit rather than crash /schema
 
         properties[param.name] = prop
 
@@ -145,9 +151,16 @@ def _schema_from_signature(fn: Callable) -> dict[str, Any]:
             else:
                 prop["description"] = hint
 
-        # Default value
+        # Default value — omit None defaults (consistent with _schema_from_extracted)
+        # and guard against non-JSON-serializable values so /schema can never raise.
         if param.default != inspect.Parameter.empty:
-            prop["default"] = param.default
+            if param.default is not None:
+                try:
+                    import json as _json
+                    _json.dumps(param.default)
+                    prop["default"] = param.default
+                except (TypeError, ValueError):
+                    pass  # Non-serializable default — omit rather than crash /schema
         else:
             required.append(name)
 

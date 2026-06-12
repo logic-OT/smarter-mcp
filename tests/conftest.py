@@ -1,6 +1,7 @@
 """Test configuration and fixtures."""
 
 import pytest
+
 from smarter_mcp._decorators import clear_global_registry
 
 

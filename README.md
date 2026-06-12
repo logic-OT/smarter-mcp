@@ -1,6 +1,5 @@
 <img width="770" height="159" alt="image" src="https://github.com/user-attachments/assets/2be86ef1-e7f6-4fc4-8b4c-89ab3b98124a" />
-
-# Smarter-MCP 🚀
+# Smarter-MCP
 
 > **The highest-level Python framework for building, generating, and running MCP servers.**
 
@@ -56,7 +55,7 @@ class DatabaseClient:
         return self.conn.execute(sql).fetchall()
 ```
 
-One instance per session. Constructor args injected from config. Cleaned up on session end. You write the class, Smarter-MCP handles the plumbing.
+One instance per session. Constructor args injected from config. Session instances are evicted via bounded LRU (max 256 entries) with best-effort resource cleanup (`close()`/`__exit__`) on eviction. You write the class, Smarter-MCP handles the plumbing.
 
 ---
 
@@ -85,9 +84,7 @@ app.run()
 Regardless of how a tool was registered, every call goes through:
 
 - ✅ **Schema validation** — parameters validated before your function is called. Clean errors back to the agent, not raw tracebacks.
- **Type coercion** — agents send `"42"` instead of `42` constantly. Handled silently.
-- ✅ **Schema validation** — parameters validated before your function is called. Clean errors back to the agent, not raw tracebacks.
-- ✅ **Schema validation** — parameters validated before your function is called. Clean errors back to the agent, not raw tracebacks.
+- ✅ **Type coercion** — agents send `"42"` instead of `42` constantly. Handled silently.
 - ✅ **Multimodal** — `PIL.Image` and `np.ndarray` parameters decoded from `ImageContent` automatically. Return images and they're wrapped back up.
 - ✅ **Instance lifecycle** — `session`, `singleton`, or `per-call`. Resolved and bound per request.
 - ✅ **Namespace routing** — auto-derived from module paths. No silent name collisions.
@@ -103,9 +100,10 @@ Point Smarter-MCP at an undocumented library and it will write the tool descript
 
 ```yaml
 llm:
+  enabled: true
   provider: anthropic        # or openai, openrouter
-  model: claude-3-5-haiku
-  cache: true
+  model: claude-3-5-haiku-20241022
+  cache_path: .smarter-mcp/description-cache.json
 ```
 or in code:
 
@@ -114,7 +112,7 @@ server = SmarterMCP(
     "my-server",
     llm_enabled=True,
     llm_provider="anthropic",
-    llm_model="claude-3-5-haiku",
+    llm_model="claude-3-5-haiku-20241022",
 )
 server.run()
 ```
@@ -141,8 +139,8 @@ sources:
     namespace: random_tools
 
 expose:
-  private: false
-  unannotated: warn
+  include_private: false
+  unannotated_policy: warn
 ```
 
 ```bash

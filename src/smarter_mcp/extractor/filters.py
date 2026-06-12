@@ -11,10 +11,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
 from .models import (
-    CallableKind,
     ExtractedCallable,
     ExtractedClass,
     ExtractedModule,
@@ -198,7 +196,7 @@ def _should_expose(
     # __all__ filtering (only for module-level functions)
     if allowed_names is not None and callable.class_name is None:
         if name not in allowed_names:
-            return False, f"not in __all__"
+            return False, "not in __all__"
 
     # Dunder methods
     if name.startswith("__") and name.endswith("__"):

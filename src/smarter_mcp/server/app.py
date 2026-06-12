@@ -14,12 +14,15 @@ from __future__ import annotations
 import importlib
 import logging
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from fastmcp import FastMCP
 
+from smarter_mcp._registry import ToolRegistry
+from smarter_mcp._testing import TestReport, ToolTestRunner
 from smarter_mcp.config.manifest import (
     ManifestConfig,
     default_manifest,
@@ -33,20 +36,40 @@ from smarter_mcp.extractor.filters import (
     apply_filters,
 )
 from smarter_mcp.extractor.models import (
-    ExtractionResult,
+    CallableKind,
     ExtractedCallable,
     ExtractedModule,
     ExtractedParam,
-    CallableKind,
+    ExtractionResult,
     ParamKind,
 )
-from smarter_mcp.extractor.surface import SurfaceExtractor, _SYS_PATH_LOCK, _INSPECT_PARAM_KIND_MAP
+from smarter_mcp.extractor.surface import _INSPECT_PARAM_KIND_MAP, _SYS_PATH_LOCK, SurfaceExtractor
 from smarter_mcp.runtime.instances import InstanceManager
 from smarter_mcp.server.router import NamespaceRouter
-from smarter_mcp._registry import ToolRegistry
-from smarter_mcp._testing import ToolTestRunner, TestReport
 
 logger = logging.getLogger(__name__)
+
+# Loopback addresses — binding to anything else without auth is dangerous.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _warn_insecure_bind(server_config: Any) -> None:
+    """H1: emit a loud WARNING when the server is bound to a non-loopback
+    address with authentication disabled.
+
+    This does NOT prevent startup — operators may have valid reasons (e.g.
+    a private LAN with no public exposure) — but the warning is hard to miss.
+    """
+    host = getattr(server_config, "host", "127.0.0.1")
+    auth_enabled = getattr(server_config, "auth_enabled", False)
+    if host not in _LOOPBACK_HOSTS and not auth_enabled:
+        logger.warning(
+            "SECURITY WARNING: Server is binding to %s with auth_enabled=False. "
+            "All tools are accessible to anyone on the network without authentication. "
+            "Set auth_enabled=True and configure %s, or bind to 127.0.0.1.",
+            host,
+            getattr(server_config, "auth_keys_env", "SMARTER_MCP_API_KEYS"),
+        )
 
 
 def _fix_package_module_names(
@@ -80,12 +103,17 @@ def _fix_package_module_names(
         prefix_old = old_name + "." if old_name else ""
         prefix_new = new_name + "."
 
-        def _fix_qname(qname: str) -> str:
-            if qname.startswith(prefix_old):
-                return prefix_new + qname[len(prefix_old):]
+        def _fix_qname(
+            qname: str,
+            _new: str = new_name,
+            _pold: str = prefix_old,
+            _pnew: str = prefix_new,
+        ) -> str:
+            if qname.startswith(_pold):
+                return _pnew + qname[len(_pold):]
             # Bare name with no prefix (happens when old_name is "")
-            if not prefix_old:
-                return f"{new_name}.{qname}" if qname else new_name
+            if not _pold:
+                return f"{_new}.{qname}" if qname else _new
             return qname
 
         new_functions = [
@@ -369,11 +397,11 @@ class SmarterMCP:
         # Apply overrides — server
         # C3: name is the first positional parameter (matching FastMCP convention),
         # so SmarterMCP("my-server") correctly sets the server name.
-        if name:
+        if name is not None:
             self._config.name = name
-        if port:
+        if port is not None:
             self._config.server.port = port
-        if host:
+        if host is not None:
             self._config.server.host = host
         if transport:
             self._config.server.transport = transport
@@ -425,12 +453,22 @@ class SmarterMCP:
         # does not re-extend tool.tests with duplicate cases.
         self._tests_wired: bool = False
 
+        # Wire server.log_level: configure the root Python logger level so the
+        # manifest controls verbosity without requiring CLI flags.  An invalid
+        # value (e.g. "verbose" instead of "debug") is silently ignored so a
+        # typo does not prevent the server from starting.
+        _level_name = self._config.server.log_level.upper()
+        _level = getattr(logging, _level_name, None)
+        if isinstance(_level, int):
+            logging.getLogger().setLevel(_level)
+
 
 
     def discover(
         self,
         source_root: str | Path,
         exclude: list[str] | None = None,
+        include: list[str] | None = None,
         use_cache: bool = False,
     ) -> SmarterMCP:
         """Scan the filesystem within a source directory to discover and register tools.
@@ -443,6 +481,8 @@ class SmarterMCP:
                 Raises ``ValueError`` when the path does not exist (C3 fix).
             exclude: Glob patterns or filenames to skip during AST extraction. Defaults to
                 filtering test files like `test_*`, `*_test.py`, and `conftest.py`.
+            include: When non-empty, only files matching at least one of these glob patterns
+                are scanned.  Wired from ``SourceConfig.include`` in manifest sources.
             use_cache: If True, uses the disk cache to skip unchanged source files during AST
                 extraction, speeding up startup times.
 
@@ -462,6 +502,7 @@ class SmarterMCP:
             source_root=path,
             use_inspect=self._use_inspect,
             exclude_patterns=exclude or ["test_*", "*_test.py", "conftest.py"],
+            include_patterns=include or [],
             use_cache=use_cache,
         )
         extraction = extractor.extract()
@@ -547,7 +588,7 @@ class SmarterMCP:
             extracted_mod = ExtractedModule(module_path="", module_name=class_module_name)
             impls: dict[str, Any] = {}
 
-            for mname, obj in py_inspect.getmembers(cls, predicate=py_inspect.isroutine):
+            for mname, _obj in py_inspect.getmembers(cls, predicate=py_inspect.isroutine):
                 if include and mname not in include:
                     continue
                 if exclude and mname in exclude:
@@ -738,9 +779,9 @@ class SmarterMCP:
         # a prior build() call, and never clear the global (other SmarterMCP
         # instances in the same process may still need it).
         from smarter_mcp._decorators import (
-            get_global_tools,
             get_global_resources,
             get_global_toolkits,
+            get_global_tools,
         )
 
         # 1. Register global toolkits
@@ -759,7 +800,7 @@ class SmarterMCP:
                 lifecycle=lifecycle,
                 args=constructor_args
             )
-            for name, fn in cls.__dict__.items():
+            for _name, fn in cls.__dict__.items():
                 if getattr(fn, "_smarter_mcp_tool", False):
                     self._registry.register_tool(
                         fn,
@@ -833,7 +874,11 @@ class SmarterMCP:
                     )
                     continue
 
-                self.discover(str(src_path), exclude=source.exclude)
+                self.discover(
+                    str(src_path),
+                    exclude=source.exclude,
+                    include=source.include if source.include else None,
+                )
 
         # Step 2: Wire manifest test cases into the registry.
         # ToolOverride.tests defined in YAML need to be merged into the
@@ -861,14 +906,19 @@ class SmarterMCP:
                 LLMGenerator(self._config.llm).enrich_registry(self._registry)
             except LLMNotAvailableError as e:
                 logger.warning("LLM description generation skipped: %s", e)
-            except Exception as e:  # noqa: BLE001 - never block server build
+            except Exception as e:
                 logger.warning("LLM description generation failed: %s", e)
 
         # Step 3: Build router + server
         from smarter_mcp.server.security import (
+            assert_auth_keys_present,
             build_auth_provider,
             build_rate_limit_middleware,
         )
+
+        # H7 / A2: fail-closed guard — fires regardless of which public
+        # entrypoint (build/http_app/run) is used.
+        assert_auth_keys_present(self._config.server)
 
         self._router = NamespaceRouter(
             config=self._config,
@@ -884,8 +934,10 @@ class SmarterMCP:
         # Register custom HTTP endpoints (health + schema introspection)
         from starlette.requests import Request
         from starlette.responses import JSONResponse
+
         from smarter_mcp.server.health import HealthEndpoint
         from smarter_mcp.server.schema_endpoint import SchemaEndpoint
+        from smarter_mcp.server.security import _constant_time_key_check, load_api_keys
 
         _health_ep = HealthEndpoint(
             self._router,
@@ -893,17 +945,52 @@ class SmarterMCP:
             extraction_result=self._extraction,
             import_failure_count=self._import_failure_count,
         )
-        _schema_ep = SchemaEndpoint(self._registry)
+        # A1: SchemaEndpoint gets the ROUTER so it builds from the registered
+        # tool surface (respects expose=False, name overrides, etc.).
+        _schema_ep = SchemaEndpoint(self._registry, router=self._router)
+
+        _auth_enabled = self._config.server.auth_enabled
+        _auth_header = self._config.server.auth_header
+        _auth_keys_env = self._config.server.auth_keys_env
+
+        def _is_authenticated(request: Request) -> bool:
+            """Return True if the request carries a valid API key."""
+            if not _auth_enabled:
+                return False
+            keys = load_api_keys(_auth_keys_env)
+            provided = request.headers.get(_auth_header, "")
+            return bool(provided) and _constant_time_key_check(provided, keys)
 
         @self._server.custom_route("/health", methods=["GET"])
         async def _health_handler(request: Request) -> JSONResponse:
-            return JSONResponse(_health_ep.get_health())
+            # H8: unauthenticated callers get only the bare status; full
+            # detail (namespaces, counts, version) requires a valid API key.
+            return JSONResponse(
+                _health_ep.get_health(authenticated=_is_authenticated(request))
+            )
 
         @self._server.custom_route("/mcp/{namespace}/schema", methods=["GET"])
         async def _schema_handler(request: Request) -> JSONResponse:
+            # I1: gate the tool-surface schema behind authentication when auth
+            # is enabled.  Unauthenticated callers could otherwise enumerate
+            # every registered tool even if the raw server property is mounted
+            # separately (e.g. in a larger ASGI composite).
+            if _auth_enabled and not _is_authenticated(request):
+                return JSONResponse(
+                    {
+                        "error": "unauthorized",
+                        "message": f"Missing or invalid {_auth_header}",
+                    },
+                    status_code=401,
+                )
             ns = request.path_params["namespace"]
             compact = request.query_params.get("compact", "false").lower() == "true"
-            return JSONResponse(_schema_ep.get_namespace_schema(ns, compact=compact))
+            result = _schema_ep.get_namespace_schema(ns, compact=compact)
+            # H8 / A1: if the namespace was not found, return 404 (not 200
+            # with an error key, which agents can't distinguish from success).
+            if "error" in result:
+                return JSONResponse(result, status_code=404)
+            return JSONResponse(result)
 
         logger.info(
             "Server '%s' ready: %d namespaces, %s transport",
@@ -981,28 +1068,49 @@ class SmarterMCP:
         logger.info(report.summary())
 
     def _asgi_middleware(self) -> list:
-        """Construct ASGI middleware to enforce authentication rules.
-
-        Loads allowed API keys from the configured environment variables and builds
-        the starlette APIKeyMiddleware wrapper.
+        """Construct ASGI middleware to enforce authentication and rate-limiting.
 
         Returns:
-            A list containing Starlette Middleware objects if auth is enabled, or an empty list.
+            A list of Starlette ``Middleware`` objects.  ``IPRateLimitMiddleware``
+            is placed first (outermost) so it throttles even unauthenticated
+            floods before they reach the auth layer.  ``APIKeyMiddleware`` is
+            added only when auth is enabled.
+
+        C3: ``IPRateLimitMiddleware`` is now wired in here (gated on
+        ``rate_limit_enabled``) so it actually runs on ``http_app()`` /
+        ``run()`` — previously it was built but never applied to the ASGI stack.
         """
-        if not self._config.server.auth_enabled:
-            return []
-
         from starlette.middleware import Middleware
-        from smarter_mcp.server.security import APIKeyMiddleware, load_api_keys
 
-        keys = load_api_keys(self._config.server.auth_keys_env)
-        return [
-            Middleware(
-                APIKeyMiddleware,
-                header_name=self._config.server.auth_header,
-                valid_keys=keys,
+        from smarter_mcp.server.security import (
+            APIKeyMiddleware,
+            IPRateLimitMiddleware,
+            load_api_keys,
+        )
+
+        result: list = []
+
+        # C3: IP rate limiting — outermost so it fires before auth.
+        if self._config.server.rate_limit_enabled:
+            result.append(
+                Middleware(
+                    IPRateLimitMiddleware,
+                    max_requests=self._config.server.rate_limit_per_minute,
+                    window_seconds=60,
+                )
             )
-        ]
+
+        if self._config.server.auth_enabled:
+            keys = load_api_keys(self._config.server.auth_keys_env)
+            result.append(
+                Middleware(
+                    APIKeyMiddleware,
+                    header_name=self._config.server.auth_header,
+                    valid_keys=keys,
+                )
+            )
+
+        return result
 
     def http_app(self) -> Any:
         """Construct and return the Starlette ASGI application with configured middlewares.
@@ -1016,6 +1124,7 @@ class SmarterMCP:
         """
         if self._server is None:
             self.build()
+        _warn_insecure_bind(self._config.server)
         return self._server.http_app(middleware=self._asgi_middleware())
 
     def run(self) -> None:
@@ -1036,6 +1145,7 @@ class SmarterMCP:
         if transport == "stdio":
             self._server.run(transport="stdio")
         elif transport == "sse":
+            _warn_insecure_bind(self._config.server)
             self._server.run(
                 transport="sse",
                 host=self._config.server.host,
@@ -1043,6 +1153,7 @@ class SmarterMCP:
                 middleware=self._asgi_middleware(),
             )
         elif transport == "streamable-http":
+            _warn_insecure_bind(self._config.server)
             self._server.run(
                 transport="streamable-http",
                 host=self._config.server.host,

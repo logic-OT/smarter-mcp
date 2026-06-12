@@ -1,5 +1,7 @@
 # Smarter-MCP — Specification
 
+> **Historical design spec** — reflects intended architecture at time of writing; always verify against current source for exact field names and behavior.
+
 > The highest-level Python framework for building and generating MCP servers.
 
 ---
@@ -74,7 +76,7 @@ The `@toolkit()` decorator handles:
 - Automatic class instantiation with the specified lifecycle (session, singleton, or per-call)
 - `self` binding on every tool call — each MCP session gets its own instance
 - Constructor argument injection from decorator kwargs or environment variables
-- Cleanup on session end
+- Session instances evicted via bounded LRU (max 256 entries) with best-effort cleanup (`close()`/`__exit__`) on eviction
 
 **Resources:**
 
@@ -161,7 +163,7 @@ app.run()
 - `async def` functions and async methods
 - Functions with `*args` / `**kwargs` — detected and excluded by default with a warning
 - Dataclass methods
-- Inherited methods — controlled by `inherit_methods: true/false` in config
+- Inherited methods — controlled by `include_inherited: true/false` in config
 
 **Class instantiation model** (for auto-discovered classes):
 
@@ -171,7 +173,7 @@ When a class method is exposed via auto-discovery, Smarter-MCP needs an instance
 2. **Singleton factory** (convention): a module-level function named `get_<ClassName>()` or `create_<ClassName>()` is detected and used automatically
 3. **Default constructor** (fallback): `cls()` is attempted; if it fails, the class is surfaced as a warning and skipped
 
-Instance lifecycle is session-scoped by default: one instance per MCP session, cleaned up on session end. Stateful classes (database clients, connection pools) work correctly — each agent session gets its own instance.
+Instance lifecycle is session-scoped by default: one instance per MCP session, evicted via bounded LRU (max 256 entries) with best-effort cleanup (`close()`/`__exit__`) on eviction (FastMCP 3.3.1 exposes no session-disconnect hook). Stateful classes (database clients, connection pools) work correctly — each agent session gets its own instance.
 
 **Name collision resolution:**
 
@@ -219,7 +221,7 @@ description: "MCP server for chemistry and utility functions"
 server:
   host: 0.0.0.0
   port: 8000
-  transport: [sse, stdio]   # run both simultaneously
+  transport: sse       # sse | streamable-http | stdio
 
 sources:
   # Local codebase
@@ -243,21 +245,21 @@ sources:
 
 # Global exposure rules
 expose:
-  private: false
-  inherited: false
-  unannotated: warn        # warn | expose | skip
-  variadic: skip           # skip | warn | expose
-  properties: true
+  include_private: false
+  include_inherited: false
+  unannotated_policy: warn        # warn | expose | skip
+  variadic_policy: skip           # skip | warn | expose
+  include_properties: true
 
 # Class instantiation (for path-based discovery)
 instances:
-  - class: my_local_utils.DBClient
-    constructor:
+  - class_name: my_local_utils.DBClient
+    constructor_args:
       host: "${DB_HOST}"     # env var substitution
       port: 5432
     lifecycle: session
 
-  - class: my_local_utils.Pipeline
+  - class_name: my_local_utils.Pipeline
     factory: my_local_utils.build_default_pipeline
     lifecycle: singleton
 
@@ -266,18 +268,10 @@ tools:
   - function: random.choices
     name: random_pick
     description: "Pick k random items from a list, with optional weights"
-    parameters:
-      population:
-        description: "The list of items to choose from"
-      k:
-        description: "Number of items to pick"
 
   - function: json.dumps
     name: to_json
     description: "Convert a Python dict/list to a JSON string"
-    parameters:
-      obj:
-        description: "The object to serialize"
 
   - function: my_local_utils._internal_helper
     expose: false            # explicitly exclude
@@ -285,14 +279,13 @@ tools:
 # Multimodal return type detection
 multimodal:
   auto_detect: true
-  image_format: png
 
 # LLM-assisted description generation
 llm:
   enabled: false
   provider: openrouter
   model: google/gemini-2.0-flash-001
-  cache: true
+  cache_path: .smarter-mcp/description-cache.json
 ```
 
 **CLI auto-detection:** When `smarter-mcp serve ./server.py` is called and the file contains a `SmarterMCP` instance, the CLI imports the file and runs that instance directly — supporting decorator-based servers from the command line.
@@ -450,9 +443,7 @@ Smarter-MCP's core is intentionally lean. Heavy dependencies are optional extras
 | `pydantic>=2.0` | ~3MB | Schema validation (already required by fastmcp) |
 | `click>=8.0` | ~200KB | CLI |
 | `pyyaml>=6.0` | ~200KB | Manifest parsing |
-| `structlog>=23.0` | ~300KB | Structured logging |
-| `jinja2>=3.0` | ~500KB | Export templates |
-| **Total** | **~6MB** | |
+| **Total** | **~5.5MB** | |
 
 **Optional extras:**
 
@@ -482,20 +473,18 @@ pip install smarter-mcp[all]          # everything
 
 ```yaml
 server:
-  rate_limit:
-    per_session: 100/minute
-    global: 1000/minute
+  rate_limit_enabled: true
+  rate_limit_per_minute: 100
+  rate_limit_global_per_minute: 1000
 ```
 
 **Auth (optional):**
 
 ```yaml
 server:
-  auth:
-    type: api_key
-    header: X-API-Key
-    keys:
-      - "${MCP_API_KEY}"
+  auth_enabled: true
+  auth_header: X-API-Key
+  auth_keys_env: MCP_API_KEYS
 ```
 
 ---

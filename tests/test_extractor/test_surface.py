@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from smarter_mcp.extractor.models import CallableKind, ParamKind
+from smarter_mcp.extractor.models import CallableKind
 from smarter_mcp.extractor.surface import SurfaceExtractor
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
@@ -189,7 +189,7 @@ class TestSourceStringExtraction:
                 """Say hello."""
                 return f"Hello, {name}!"
         ''')
-        extractor = SurfaceExtractor("/tmp", use_inspect=False)
+        extractor = SurfaceExtractor("/tmp", use_inspect=False)  # noqa: S108 — dummy root path, no file I/O
         module = extractor.extract_source(source, "test.py", "test")
         assert len(module.functions) == 1
         func = module.functions[0]
@@ -202,7 +202,7 @@ class TestSourceStringExtraction:
                 """Greet someone multiple times."""
                 pass
         ''')
-        extractor = SurfaceExtractor("/tmp", use_inspect=False)
+        extractor = SurfaceExtractor("/tmp", use_inspect=False)  # noqa: S108 — dummy root path, no file I/O
         module = extractor.extract_source(source, "test.py", "test")
         func = module.functions[0]
         params = func.non_self_params

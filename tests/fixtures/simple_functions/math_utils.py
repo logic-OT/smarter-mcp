@@ -60,4 +60,4 @@ def process_items(*args, **kwargs):
     return list(args)
 
 
-__all__ = ["add", "multiply", "fetch_data", "greet"]
+__all__ = ["add", "fetch_data", "greet", "multiply"]

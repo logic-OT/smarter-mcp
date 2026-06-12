@@ -11,7 +11,6 @@ Run with stdout+stderr redirected to logs/ (see run_validation.sh).
 from __future__ import annotations
 
 import asyncio
-import inspect
 import sys
 import tempfile
 import traceback
@@ -36,6 +35,7 @@ def section(title: str) -> None:
 async def check_c1_string_return() -> None:
     section("C1: string-returning tool")
     from fastmcp import Client
+
     from smarter_mcp import SmarterMCP, tool
 
     app = SmarterMCP(name="c1-server")
@@ -60,7 +60,7 @@ async def check_c1_string_return() -> None:
                 f"greet returned {text!r} (content={getattr(res,'content',None)!r}); "
                 f"expected the plain string back",
             )
-    except Exception as e:  # noqa: BLE001 - we are probing for the failure
+    except Exception as e:
         record(
             "C1",
             True,
@@ -77,6 +77,7 @@ async def check_c2_session_lifecycle() -> None:
     import importlib
 
     from fastmcp import Client
+
     from smarter_mcp import SmarterMCP
 
     # Write the toolkit to a real importable module so class resolution works
@@ -127,7 +128,7 @@ async def check_c2_session_lifecycle() -> None:
                 f"two bump() calls in one session returned {v1!r} then {v2!r}; "
                 f"session state working would give 1 then 2 (tool name: {bump_name!r})",
             )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         record("C2", True, f"session toolkit call raised {type(e).__name__}: {e!r}")
 
 
@@ -136,10 +137,10 @@ async def check_c2_session_lifecycle() -> None:
 # ---------------------------------------------------------------------------
 def check_c3_positional_name() -> None:
     section("C3: positional name treated as source_root")
-    from smarter_mcp import SmarterMCP
-
     # Run from a temp dir so a stray parent manifest can't interfere.
     import os
+
+    from smarter_mcp import SmarterMCP
 
     prev = os.getcwd()
     with tempfile.TemporaryDirectory() as td:
@@ -165,10 +166,10 @@ def check_c3_positional_name() -> None:
 # ---------------------------------------------------------------------------
 def check_c4_discover_module() -> None:
     section("C4: discover_module on package and class")
-    from smarter_mcp import SmarterMCP
-
     # 4a: a package (json is a package-like stdlib module with __init__).
     import json
+
+    from smarter_mcp import SmarterMCP
 
     app = SmarterMCP(name="c4-pkg")
     try:
@@ -182,7 +183,7 @@ def check_c4_discover_module() -> None:
             f"discover_module(json, include=['dumps','loads']) registered {n} tools "
             f"(names={names})",
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         record("C4a", True, f"discover_module(json,...) raised {type(e).__name__}: {e!r}")
 
     # 4b: a class (README's pd.DataFrame example shape) — use a stdlib class.
@@ -207,7 +208,7 @@ def check_c4_discover_module() -> None:
             f"tools (name, class_name, n_params) = {bad}; class_name=None means "
             f"unbound methods registered via the inspect-only fallback",
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         record("C4b", True, f"discover_module(Counter,...) raised {type(e).__name__}: {e!r}")
 
 
@@ -240,7 +241,7 @@ def check_c5_silent_extraction_errors() -> None:
                 f"{names}, app.extraction_result={extraction!r}. The broken file produced no "
                 f"error to the caller; only the valid file's tool survived.",
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             record("C5", False, f"discover() actually raised (good): {type(e).__name__}: {e!r}")
 
 
@@ -256,7 +257,7 @@ def check_h9_recursion() -> None:
         record("H9", False, f"coerced cleanly to {out!r} (no recursion)")
     except RecursionError:
         record("H9", True, "coercing list[int | None] raised RecursionError")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         record("H9", False, f"raised {type(e).__name__}: {e!r} (not RecursionError)")
 
 
@@ -327,7 +328,7 @@ def check_h15_unknown_keys() -> None:
                 f"manifest with bogus keys (private/unannotated/totally_made_up_key) "
                 f"loaded clean: name={cfg.name!r} — no extra='forbid', typos are silent",
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             record("H15", False, f"load_manifest rejected unknown keys (good): {e!r}")
 
 
@@ -358,7 +359,7 @@ def main() -> int:
         import fastmcp
 
         print(f"fastmcp={fastmcp.__version__}", flush=True)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         print(f"fastmcp import failed: {e!r}", flush=True)
 
     # Sync checks
@@ -373,7 +374,7 @@ def main() -> int:
     ):
         try:
             fn()
-        except Exception:  # noqa: BLE001
+        except Exception:
             print(f"\n[HARNESS ERROR in {fn.__name__}]", flush=True)
             traceback.print_exc()
 
@@ -381,7 +382,7 @@ def main() -> int:
     for coro in (check_c1_string_return, check_c2_session_lifecycle):
         try:
             asyncio.run(coro())
-        except Exception:  # noqa: BLE001
+        except Exception:
             print(f"\n[HARNESS ERROR in {coro.__name__}]", flush=True)
             traceback.print_exc()
 

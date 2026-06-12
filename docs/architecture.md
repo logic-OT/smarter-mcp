@@ -102,13 +102,13 @@ app.run()
 ### CLI API
 
 The CLI is defined in `cli/main.py`.
- start a server
-smarter-mcp validate <target>    build and print exposed tools/resources
-smarter-mcp test <target>       
+
 ```text
-smarter-mcp serve <target>       run registered test cases
-smarter-mcp init <path>          scaffold smarter-mcp.yaml
-smarter-mcp export               placeholder command
+smarter-mcp serve <target>       start the MCP server
+smarter-mcp validate <target>    dry-run — print all exposed tools/resources; exits non-zero on extraction errors
+smarter-mcp test <target>        run predefined or ad-hoc tool test cases
+smarter-mcp init <path>          scaffold smarter-mcp.yaml in the working directory
+smarter-mcp export               stub — standalone package export (not yet implemented)
 ```
 
 ## Build Lifecycle
@@ -167,12 +167,12 @@ flowchart TB
     Manifest["ManifestConfig"]
     Manifest --> Server["server<br/>host, port, transport<br/>auth fields, rate-limit fields"]
     Manifest --> Sources["sources<br/>path or module<br/>include/exclude namespace"]
-    Manifest --> Routing["routing<br/>base path, overrides, separator"]
+    Manifest --> Routing["routing<br/>overrides, separator"]
     Manifest --> Expose["expose<br/>private, inherited, properties,<br/>variadic, unannotated"]
     Manifest --> Instances["instances<br/>class lifecycle and constructor/factory args"]
     Manifest --> Tools["tools<br/>name, description, expose flag, tests"]
     Manifest --> Multimodal["multimodal<br/>image behavior config"]
-    Manifest --> LLM["llm<br/>provider, model, cache, overwrite"]
+    Manifest --> LLM["llm<br/>provider, model, cache_path, overwrite_existing"]
 ```
 
 The `server` auth and rate-limit fields are fully wired: `build()` constructs a

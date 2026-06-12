@@ -1,30 +1,53 @@
 name: Publish to PyPI
 
+# Triggers on version tags (e.g. v0.1.1, v1.0.0).
+# PREREQUISITE: configure the PyPI Trusted Publisher for this repo at
+# https://pypi.org/manage/account/publishing/ — project "smarter-mcp",
+# owner "logic-OT", workflow "publish.yml", environment "pypi".
+# Long-lived tokens (UV_PUBLISH_TOKEN / PYPI_TOKEN) are NOT used here.
+
 on:
   push:
-    branches:
-      - "version_*"
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
 
 jobs:
-  publish:
+  # ── 1. Run full CI before allowing any publish ─────────────────────────────
+  test:
+    name: CI gate (Python 3.12)
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --extra all
+      - name: Lint (ruff)
+        run: uv run ruff check src/ tests/
+      - name: Test (pytest)
+        run: uv run pytest -q
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v2
-
-      - name: Build package
+  # ── 2. Build and publish only after tests pass ────────────────────────────
+  publish:
+    name: Publish to PyPI
+    needs: test
+    runs-on: ubuntu-latest
+    environment: pypi           # requires branch-protection / approval on GitHub
+    permissions:
+      contents: read
+      id-token: write           # OIDC trusted publishing — no long-lived secret
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+        with:
+          python-version: "3.12"
+      - name: Build wheel + sdist
         run: uv build
-
-      - name: Publish to PyPI
-        run: uv publish
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+      - name: Publish to PyPI (OIDC)
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0

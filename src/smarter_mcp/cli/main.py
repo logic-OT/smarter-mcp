@@ -15,7 +15,6 @@ import click
 from smarter_mcp.cli._detect import resolve_target
 from smarter_mcp.server.app import SmarterMCP
 
-
 BANNER = r"""
 ┌─┐ ┌┬┐ ┌─┐ ┬─┐ ┌┬┐ ┌─┐ ┬─┐
 └─┐ │││ ├─┤ ├┬┘  │  ├┤  ├┬┘ - MCP
@@ -72,11 +71,11 @@ def serve(
     if dev:
         try:
             import watchfiles
-        except ImportError:
+        except ImportError as exc:
             raise click.ClickException(
                 "Development dependency 'watchfiles' is required for hot-reloading (--dev). "
                 "Install it with `pip install smarter-mcp[dev]` or `pip install watchfiles`."
-            )
+            ) from exc
 
         # Resolve directory/parent directory to watch
         watch_path = Path.cwd()
@@ -106,7 +105,7 @@ def serve(
                     app.config.server.host = host
                 if transport is not None:
                     app.config.server.transport = transport
-                
+
                 # Print banner
                 active_transport = app.config.server.transport
                 if active_transport == "stdio":
@@ -127,7 +126,7 @@ def serve(
             app.config.server.host = host
         if transport is not None:
             app.config.server.transport = transport
-        
+
         # Print banner
         active_transport = app.config.server.transport
         if active_transport == "stdio":
@@ -272,12 +271,12 @@ def test(
         try:
             params = json.loads(params_json)
         except json.JSONDecodeError as e:
-            raise click.ClickException(f"Invalid JSON in --params: {e}")
+            raise click.ClickException(f"Invalid JSON in --params: {e}") from e
 
     try:
         report = app.test(tool_name=tool_name, params=params, verbose=False)
     except ValueError as e:
-        raise click.ClickException(str(e))
+        raise click.ClickException(str(e)) from e
 
     for result in report.results:
         status_symbol = click.style("✓ PASS", fg="green", bold=True) if result.passed else click.style("✗ FAIL", fg="red", bold=True)
@@ -318,8 +317,14 @@ def init(path: str, output: str | None, force: bool):
     # it) and fall back to scanning the cwd. This preserves the original
     # `smarter-mcp init ./new-project` workflow where the dir is scaffolded fresh.
     if not given_path.exists():
+        if output:
+            raise click.ClickException(
+                f"Source path does not exist: {given_path}. "
+                "Omit --output to scaffold a new project directory at that path, "
+                "or point PATH to an existing directory to scan."
+            )
         output_dir = given_path
-        scan_path = Path(output).resolve() if output else Path.cwd()
+        scan_path = Path.cwd()
     else:
         scan_path = given_path
         output_dir = Path(output).resolve() if output else Path.cwd()
@@ -358,7 +363,7 @@ def init(path: str, output: str | None, force: bool):
             from smarter_mcp.extractor.surface import SurfaceExtractor
             extractor = SurfaceExtractor(source_root=source_root)
             from smarter_mcp.extractor.filters import apply_filters
-            from smarter_mcp.server.app import _resolve_implementations, _exposure_rules_from_config
+            from smarter_mcp.server.app import _exposure_rules_from_config, _resolve_implementations
             extraction = extractor.extract_file(scan_path)
             from smarter_mcp.extractor.models import ExtractionResult
             result = ExtractionResult(modules=[extraction])
@@ -425,7 +430,7 @@ version: "0.1.0"
 description: "MCP Server generated from {server_name}"
 
 server:
-  host: "0.0.0.0"
+  host: "127.0.0.1"
   port: 8000
   transport: "sse" # Options: sse, streamable-http, stdio
   log_level: "info"
@@ -438,9 +443,9 @@ sources:
       - "conftest.py"
 
 # routing:
-#   base_path: "/mcp"
-#   root_aggregate: true
 #   separator: "_"
+#   overrides:
+#     db/client: database
 
 # expose:
 #   include_private: false
@@ -464,7 +469,7 @@ sources:
         output_file.write_text(yaml_content, encoding="utf-8")
         click.echo(click.style(f"✓ Initialized Smarter-MCP manifest at '{output_file}'", fg="green", bold=True))
     except Exception as e:
-        raise click.ClickException(f"Failed to write manifest file: {e}")
+        raise click.ClickException(f"Failed to write manifest file: {e}") from e
 
 
 @cli.command()

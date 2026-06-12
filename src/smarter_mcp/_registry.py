@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import inspect
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from .extractor.models import ExtractedCallable, ExtractedModule, ExtractionResult
 
@@ -94,7 +95,7 @@ class ToolRegistry:
 
         if namespace not in self._tools:
             self._tools[namespace] = {}
-            
+
         self._tools[namespace][tool_name] = tool
         return tool
 
@@ -117,7 +118,7 @@ class ToolRegistry:
 
         if namespace not in self._resources:
             self._resources[namespace] = {}
-            
+
         self._resources[namespace][uri] = res
         return res
 
@@ -136,7 +137,15 @@ class ToolRegistry:
             lifecycle=lifecycle,
             constructor_args=constructor_args or {}
         )
-        self._toolkits[cls.__name__] = tk
+        _toolkit_key = f"{cls.__module__}.{cls.__qualname__}"
+        existing = self._toolkits.get(_toolkit_key)
+        if existing is not None and existing.cls is not cls:
+            logger.warning(
+                "Toolkit collision: '%s' is already registered. "
+                "The new registration will overwrite it.",
+                _toolkit_key,
+            )
+        self._toolkits[_toolkit_key] = tk
         return tk
 
     def merge_extraction(
@@ -234,7 +243,7 @@ class ToolRegistry:
                 impl_key = f"{mod.module_name}.{obj.simple_name}"
                 if obj.class_name:
                     impl_key = f"{mod.module_name}.{obj.class_name}.{obj.simple_name}"
-                
+
                 try:
                     if obj.class_name:
                         cls_obj = getattr(module, obj.class_name)
@@ -243,18 +252,18 @@ class ToolRegistry:
                         impls[impl_key] = getattr(module, obj.simple_name)
                 except AttributeError:
                     continue
-        
+
         self.merge_extraction(extraction, impls, namespace_override=namespace_override)
 
     def get_namespace_tools(self, namespace: str) -> list[RegisteredTool]:
         return list(self._tools.get(namespace, {}).values())
-        
+
     def get_namespace_resources(self, namespace: str) -> list[RegisteredResource]:
         return list(self._resources.get(namespace, {}).values())
 
     def get_all_namespaces(self) -> set[str]:
         return set(self._tools.keys()) | set(self._resources.keys())
-        
+
     def get_all_tools(self) -> list[RegisteredTool]:
         tools = []
         for ns_tools in self._tools.values():

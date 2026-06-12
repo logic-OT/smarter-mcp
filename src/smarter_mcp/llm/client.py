@@ -58,7 +58,7 @@ class OpenAIClient(LLMClient):
         except ImportError as e:
             raise LLMNotAvailableError(
                 "The 'openai' package is required for LLM description generation. "
-                "Install it with: pip install smarter-mcp"
+                "Install it with: pip install smarter-mcp[llm]"
             ) from e
 
         provider = _normalize_provider(config.provider)
@@ -76,7 +76,12 @@ class OpenAIClient(LLMClient):
         self._model = config.model
         self._max_tokens = config.max_tokens
         self._temperature = config.temperature
-        self._client = OpenAI(api_key=api_key, base_url=base_url)
+        self._client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=20.0,   # prevent 600s SDK defaults; LLM descriptions are best-effort
+            max_retries=1,  # one retry on transient errors; fast fail on auth errors
+        )
 
     def generate(self, system: str, user: str) -> str:
         resp = self._client.chat.completions.create(

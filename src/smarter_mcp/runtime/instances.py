@@ -29,7 +29,7 @@ import inspect
 import logging
 import threading
 from collections import OrderedDict
-from typing import Any, Callable
+from typing import Any
 
 from fastmcp import Context
 
@@ -66,7 +66,7 @@ def _best_effort_close(instance: Any) -> None:
                     "eviction path.  Prefer a sync close() or __exit__.",
                     instance,
                 )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("Error closing instance %r: %s", instance, exc)
 
 

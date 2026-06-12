@@ -20,8 +20,13 @@ from smarter_mcp.server.router import NamespaceRouter
 def _make_health(
     extraction_errors: int = 0,
     import_failures: int = 0,
+    authenticated: bool = True,
 ) -> dict:
-    """Build a minimal HealthEndpoint and return its get_health() dict."""
+    """Build a minimal HealthEndpoint and return its get_health() dict.
+
+    ``authenticated=True`` by default so existing detail-field assertions work.
+    Tests for the H8 auth-gating behaviour are in test_security.py.
+    """
     router = MagicMock(spec=NamespaceRouter)
     router.namespaces = []
     registry = ToolRegistry()
@@ -35,7 +40,7 @@ def _make_health(
         extraction_result=extraction,
         import_failure_count=import_failures,
     )
-    return ep.get_health()
+    return ep.get_health(authenticated=authenticated)
 
 
 class TestHealthFields:
@@ -90,7 +95,7 @@ class TestHealthFields:
         router.namespaces = []
         registry = ToolRegistry()
         ep = HealthEndpoint(router=router, registry=registry)
-        health = ep.get_health()
+        health = ep.get_health(authenticated=True)
         assert health["status"] == "healthy"
         assert health["extraction_errors"] == 0
         assert health["import_failures"] == 0

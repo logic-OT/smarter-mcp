@@ -12,7 +12,7 @@ Usage:
     def greet(name: str) -> str:
         return f"Hello, {name}!"
 
-    app = SmarterMCP("my-server")
+    app = SmarterMCP(name="my-server")
     report = app.test()              # run all predefined tests
     report = app.test("greet")       # run tests for one tool
     report = app.test("greet", params={"name": "Bob"})  # ad-hoc test

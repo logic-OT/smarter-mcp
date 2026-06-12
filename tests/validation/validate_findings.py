@@ -47,7 +47,8 @@ async def check_c1_string_return() -> None:
     server = app.build()
     try:
         async with Client(server) as client:
-            res = await client.call_tool("default_greet", {"name": "Ada"})
+            # H12 fix: "default" namespace mounted without prefix → tool is "greet"
+            res = await client.call_tool("greet", {"name": "Ada"})
             text = res.data if hasattr(res, "data") else res
             ok_value = text == "Hello, Ada!" or (
                 getattr(res, "content", None)

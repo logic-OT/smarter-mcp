@@ -15,23 +15,8 @@ import inspect
 from typing import Any, Callable
 
 from smarter_mcp._registry import RegisteredTool
-
-
-# Maps Python type annotation strings to JSON Schema type names.
-_TYPE_MAP: dict[str, str] = {
-    "str": "string",
-    "int": "integer",
-    "float": "number",
-    "bool": "boolean",
-    "list": "array",
-    "dict": "object",
-    "None": "null",
-    "bytes": "string",
-    "PIL.Image.Image": "string",
-    "Image": "string",
-    "ndarray": "string",
-    "numpy.ndarray": "string",
-}
+from smarter_mcp._typeparse import is_multimodal_type, type_str_to_json_schema
+from smarter_mcp.extractor.models import _NON_LITERAL_TYPE
 
 
 def build_json_schema(tool: RegisteredTool) -> dict[str, Any]:
@@ -67,32 +52,36 @@ def _schema_from_extracted(tool: RegisteredTool) -> dict[str, Any]:
 
         # Resolve the JSON type from the Python type annotation
         effective_type = param.effective_type
-        is_multimodal = False
         if effective_type:
-            # Strip generics and unions to get the base type name
-            base_type = effective_type.split("[")[0].split("|")[0].strip()
-            prop["type"] = _TYPE_MAP.get(base_type, "string")
-            base_lower = base_type.lower()
-            if "pil.image" in base_lower or "image.image" in base_lower or "ndarray" in base_lower or "numpy.ndarray" in base_lower or base_lower in ("image", "pil_image"):
-                is_multimodal = True
+            type_schema = type_str_to_json_schema(effective_type)
+            prop.update(type_schema)
+            multimodal = is_multimodal_type(effective_type)
         else:
             prop["type"] = "string"
+            multimodal = False
 
         # Per-parameter description from docstring parsing
         if param.description:
             prop["description"] = param.description
 
-        if is_multimodal:
-            prop["type"] = "string"
-            desc_hint = "File path or remote URL to the image"
-            if prop.get("description"):
-                if desc_hint not in prop["description"]:
-                    prop["description"] = f"{prop['description']} ({desc_hint})"
+        # Multimodal parameters: add a description hint for clients.
+        # type_str_to_json_schema already returns {"type": "string"} for
+        # multimodal types, so no type override is needed here.
+        if multimodal:
+            hint = "File path or remote URL to the image"
+            existing_desc = prop.get("description", "")
+            if existing_desc:
+                if hint not in existing_desc:
+                    prop["description"] = f"{existing_desc} ({hint})"
             else:
-                prop["description"] = desc_hint
+                prop["description"] = hint
 
-        # Default value
-        if param.has_default and param.default is not None:
+        # Default value — skip NON_LITERAL and None sentinels
+        if (
+            param.has_default
+            and param.default is not None
+            and not isinstance(param.default, _NON_LITERAL_TYPE)
+        ):
             prop["default"] = param.default
 
         properties[param.name] = prop
@@ -131,28 +120,30 @@ def _schema_from_signature(fn: Callable) -> dict[str, Any]:
         prop: dict[str, Any] = {}
 
         # Resolve type annotation → JSON Schema type
-        is_multimodal = False
+        multimodal = False
         if param.annotation != inspect.Parameter.empty:
-            type_name = (
-                param.annotation.__name__
-                if hasattr(param.annotation, "__name__")
-                else str(param.annotation)
+            ann = param.annotation
+            type_str = (
+                ann.__name__
+                if hasattr(ann, "__name__")
+                else str(ann)
             )
-            prop["type"] = _TYPE_MAP.get(type_name, "string")
-            type_lower = type_name.lower()
-            if "pil.image" in type_lower or "image.image" in type_lower or "ndarray" in type_lower or "numpy.ndarray" in type_lower or type_lower in ("image", "pil_image"):
-                is_multimodal = True
+            type_schema = type_str_to_json_schema(type_str)
+            prop.update(type_schema)
+            multimodal = is_multimodal_type(type_str)
         else:
             prop["type"] = "string"
 
-        if is_multimodal:
-            prop["type"] = "string"
-            desc_hint = "File path or remote URL to the image"
-            if prop.get("description"):
-                if desc_hint not in prop["description"]:
-                    prop["description"] = f"{prop['description']} ({desc_hint})"
+        # type_str_to_json_schema already returns {"type": "string"} for
+        # multimodal types, so no type override is needed here.
+        if multimodal:
+            hint = "File path or remote URL to the image"
+            existing_desc = prop.get("description", "")
+            if existing_desc:
+                if hint not in existing_desc:
+                    prop["description"] = f"{existing_desc} ({hint})"
             else:
-                prop["description"] = desc_hint
+                prop["description"] = hint
 
         # Default value
         if param.default != inspect.Parameter.empty:

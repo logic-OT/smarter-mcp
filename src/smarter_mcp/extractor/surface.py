@@ -32,6 +32,7 @@ from .cache import ExtractionCache, cache_enabled
 from .docstrings import parse_docstring
 from .models import (
     MISSING,
+    NON_LITERAL,
     CallableKind,
     ExtractedCallable,
     ExtractedClass,
@@ -99,12 +100,16 @@ def _annotation_to_str(node: ast.expr | None) -> str | None:
 
 
 def _default_to_value(node: ast.expr) -> Any:
-    """Convert an AST default value node to a Python value, if literal."""
+    """Convert an AST default value node to a Python value, if literal.
+
+    For non-literal expressions (e.g. ``datetime.now()``) the ``NON_LITERAL``
+    sentinel is returned so downstream code can distinguish "has a real default
+    we can represent" from "has a default we cannot safely serialise".
+    """
     try:
         return ast.literal_eval(node)
     except (ValueError, TypeError):
-        # Non-literal default — store as string representation
-        return ast.unparse(node)
+        return NON_LITERAL
 
 
 def _get_decorator_names(decorator_list: list[ast.expr]) -> list[str]:

@@ -15,7 +15,7 @@ from __future__ import annotations
 import ast
 from typing import Any
 
-from .models import MISSING, _MISSING_TYPE
+from .models import MISSING, _MISSING_TYPE, _NON_LITERAL_TYPE
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -40,12 +40,12 @@ def infer_param_type_from_default(default: Any) -> str | None:
     """Infer parameter type from its default value.
 
     Args:
-        default: The default value (or MISSING sentinel).
+        default: The default value (or MISSING / NON_LITERAL sentinel).
 
     Returns:
         Type string like "int", "str", or None if not inferable.
     """
-    if isinstance(default, _MISSING_TYPE):
+    if isinstance(default, (_MISSING_TYPE, _NON_LITERAL_TYPE)):
         return None
 
     if default is None:
